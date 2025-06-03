@@ -1,5 +1,6 @@
 #pragma once
-#pragma warning(disable:4996) 
+#include <MapCanvas.h>
+#include <OutputWidget.h>
 #include <QtWidgets/QMainWindow>
 #include <qgsmapcanvas.h>
 #include <qgsmaptoolpan.h>
@@ -14,11 +15,6 @@ public:
     ~QGIS_dev();
 
 private:
-    QgsMapCanvas* m_mapCanvas;
-    QgsMapToolPan* m_panTool; // 声明平移工具
-    // 添加输出信息窗口
-    QPlainTextEdit* m_outputConsole;
-
-    // 添加打印矢量信息方法
-    void printVectorInfo(QgsVectorLayer* layer);
+    MapCanvas* m_mapCanvas;
+    OutputWidget* m_outputWidget;
 };

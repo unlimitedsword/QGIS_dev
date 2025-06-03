@@ -50,6 +50,7 @@
     <ClCompile>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <PreprocessorDefinitions>_USE_MATH_DEFINES;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <DisableSpecificWarnings>4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'" Label="Configuration">
@@ -71,8 +72,18 @@
   <ItemGroup>
     <QtRcc Include="QGIS_dev.qrc" />
     <QtMoc Include="QGIS_dev.h" />
+    <ClCompile Include="MapCanvas.cpp" />
+    <ClCompile Include="OutputWidget.cpp" />
+    <ClCompile Include="Output_Manager.cpp" />
     <ClCompile Include="QGIS_dev.cpp" />
     <ClCompile Include="main.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <QtMoc Include="MapCanvas.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <QtMoc Include="OutputWidget.h" />
+    <QtMoc Include="Output_Manager.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">
