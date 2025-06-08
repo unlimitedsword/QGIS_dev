@@ -26,7 +26,6 @@ void QGIS_dev::setupUI()
     // 1. 创建核心组件
     m_mapCanvas = new MapCanvas(this); // MapCanvas保持不变
 
-    // !! 关键修改: 实例化我们自己的图层树 !!
     // 并将地图画布的指针传递给它
     m_customLayerTreeView = new CustomLayerTreeView(m_mapCanvas->getCanvas(), this);
 
