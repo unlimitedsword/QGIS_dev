@@ -1,58 +1,80 @@
+// mapcanvas.cpp
+
 #include "MapCanvas.h"
-#include "Output_Manager.h"
-#include <qgsrasterlayer.h>
-#include <qgsvectorlayer.h>
+#include <qgsmapcanvas.h>
+#include <qgsmaptoolpan.h>
 #include <qgsproject.h>
-#include <qgsapplication.h>
-#include <QFileInfo>
-#include <QDebug>
+#include <qgsmaplayer.h>
 #include <QVBoxLayout>
+#include <QDebug>
 
 MapCanvas::MapCanvas(QWidget* parent)
-    : QWidget(parent) // 初始化父类
+    : QWidget(parent)
 {
-    // 初始化地图画布
     m_qgsCanvas = new QgsMapCanvas();
+    m_qgsCanvas->setCanvasColor(Qt::white);
+    m_qgsCanvas->enableAntiAliasing(true);
 
-    // 添加布局并将 m_qgsCanvas 加入
     QVBoxLayout* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(m_qgsCanvas);
     setLayout(layout);
 
-    // 初始化平移工具并设置为当前工具
     m_panTool = new QgsMapToolPan(m_qgsCanvas);
     m_qgsCanvas->setMapTool(m_panTool);
     m_panTool->setCursor(Qt::OpenHandCursor);
+
+    // --- 关键代码：连接CRS和比例尺信号 ---
+    m_qgsCanvas->setDestinationCrs(QgsProject::instance()->crs());
+    connect(QgsProject::instance(), &QgsProject::crsChanged, m_qgsCanvas, [this]() {
+        m_qgsCanvas->setDestinationCrs(QgsProject::instance()->crs());
+        });
+
+    // !! 新增 !!: 连接QgsMapCanvas的比例尺变化信号到我们的私有槽
+    connect(m_qgsCanvas, &QgsMapCanvas::scaleChanged, this, &MapCanvas::onCanvasScaleChanged);
+
+    // !! 新增 !!: 应用程序启动时，手动触发一次比例尺更新，以初始化显示
+    onCanvasScaleChanged(m_qgsCanvas->scale());
 }
 
-void MapCanvas::addVectorLayer(QString vectorLayerPath) {
-    // 检查路径是否为空或全是空白
-    if (vectorLayerPath.trimmed().isEmpty()) {
-        qDebug() << "文件路径为空";
-        return;
-    }
+MapCanvas::~MapCanvas()
+{
+}
 
-    // 检查文件是否存在
-    if (!QFileInfo::exists(vectorLayerPath)) {
-        qDebug() << "文件不存在：" << vectorLayerPath;
-        return;
-    }
+QgsMapCanvas* MapCanvas::getCanvas() const
+{
+    return m_qgsCanvas;
+}
 
-    qDebug() << "尝试加载矢量图层：" << vectorLayerPath;
-    QgsVectorLayer* vectorLayer = new QgsVectorLayer(vectorLayerPath, "My Layer", "ogr");
-
-    if (vectorLayer->isValid()) {
-        QgsProject::instance()->addMapLayer(vectorLayer);
-        m_qgsCanvas->setLayers({ vectorLayer });
-        m_qgsCanvas->setExtent(vectorLayer->extent());
-        OutputManager::instance()->logMessage("Add vectorlayer "+vectorLayerPath+" successfully!");
-    }
-    else {
-        qDebug() << "图层无效：" << vectorLayerPath;
-        delete vectorLayer;
+void MapCanvas::zoomToLayer(QgsMapLayer* layer)
+{
+    if (layer && layer->isValid()) {
+        m_qgsCanvas->setExtent(layer->extent());
+        m_qgsCanvas->refresh();
+        // 注意：setExtent会自动改变比例尺，从而触发scaleChanged信号，所以这里无需额外操作
     }
 }
 
-MapCanvas::~MapCanvas() {
+// --- 新增接口的实现 ---
 
+void MapCanvas::zoomIn()
+{
+    m_qgsCanvas->zoomIn();
+}
+
+void MapCanvas::zoomOut()
+{
+    m_qgsCanvas->zoomOut();
+}
+
+// --- 新增私有槽的实现 ---
+
+void MapCanvas::onCanvasScaleChanged(double newScale)
+{
+    // 将double类型的比例尺分母格式化为 "1:XXXXX" 的字符串
+    QString formattedScale = QString("比例尺 1:%1").arg(static_cast<int>(newScale));
+
+    // 发射我们自己的、携带格式化字符串的信号
+    emit scaleChanged(formattedScale);
+    qDebug() << "Scale changed to:" << formattedScale;
 }

@@ -1,5 +1,5 @@
 #include "Output_Manager.h"
-#include <QDebug>  // 用于控制台输出，便于调试
+#include <QDebug>
 
 OutputManager* OutputManager::m_instance = nullptr;
 

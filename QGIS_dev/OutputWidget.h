@@ -1,6 +1,8 @@
 #pragma once
 #include <QWidget>
-#include <QTextEdit>  // 添加输出窗口控件
+
+// 前向声明
+class QTextEdit;
 
 class OutputWidget : public QWidget
 {

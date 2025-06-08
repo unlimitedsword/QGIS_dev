@@ -72,6 +72,7 @@
   <ItemGroup>
     <QtRcc Include="QGIS_dev.qrc" />
     <QtMoc Include="QGIS_dev.h" />
+    <ClCompile Include="CustomLayerTreeView.cpp" />
     <ClCompile Include="MapCanvas.cpp" />
     <ClCompile Include="OutputWidget.cpp" />
     <ClCompile Include="Output_Manager.cpp" />
@@ -84,6 +85,9 @@
   <ItemGroup>
     <QtMoc Include="OutputWidget.h" />
     <QtMoc Include="Output_Manager.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <QtMoc Include="CustomLayerTreeView.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

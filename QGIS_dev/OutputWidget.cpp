@@ -1,5 +1,6 @@
 #include "Output_Manager.h"
 #include <OutputWidget.h>
+#include <QTextEdit>
 #include <QVBoxLayout>
 #include <QDateTime>
 #include <QString>
