@@ -49,6 +49,9 @@
     <ClCompile Include="CustomLayerTreeView.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="FeatureSelectionTool.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="MapCanvas.h">
@@ -61,6 +64,9 @@
       <Filter>Header Files</Filter>
     </QtMoc>
     <QtMoc Include="CustomLayerTreeView.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="FeatureSelectionTool.h">
       <Filter>Header Files</Filter>
     </QtMoc>
   </ItemGroup>

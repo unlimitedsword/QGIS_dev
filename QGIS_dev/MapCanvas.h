@@ -1,14 +1,11 @@
-// MapCanvas.h
-
-#ifndef MAPCANVAS_H
-#define MAPCANVAS_H
-
 #include <QWidget>
 
-// 前向声明，避免在头文件中包含大型QGIS头文件
 class QgsMapCanvas;
 class QgsMapLayer;
 class QgsMapToolPan;
+class FeatureSelectionTool; // <-- 新增
+class QToolBar;             // <-- 新增
+class QActionGroup;         // <-- 新增
 
 class MapCanvas : public QWidget
 {
@@ -19,6 +16,7 @@ public:
     ~MapCanvas();
 
     QgsMapCanvas* getCanvas() const;
+    QgsMapToolPan* getPanTool() const; // 获取平移工具
     void zoomToLayer(QgsMapLayer* layer);
 
 public slots:
@@ -27,7 +25,6 @@ public slots:
     void zoomOut(); // 缩小
 
 signals:
-    // --- 新增的信号 ---
     // 当比例尺变化时，发出此信号，携带格式化好的字符串
     void scaleChanged(const QString& scaleText);
 
@@ -40,5 +37,3 @@ private:
     QgsMapCanvas* m_qgsCanvas;
     QgsMapToolPan* m_panTool;
 };
-
-#endif // MAPCANVAS_H

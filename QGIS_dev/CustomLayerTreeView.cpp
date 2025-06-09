@@ -11,6 +11,8 @@
 #include <qgssymbol.h>
 #include <qgsmapcanvas.h>
 #include <QDebug>
+#include <QMessageBox>
+#include <qgsproject.h> // 需要它来移除图层
 
 const int LayerPtrRole = Qt::UserRole + 1;
 
@@ -33,7 +35,9 @@ CustomLayerTreeView::CustomLayerTreeView(QgsMapCanvas* canvas, QWidget* parent)
     setLayout(layout);
 }
 
-CustomLayerTreeView::~CustomLayerTreeView() {}
+CustomLayerTreeView::~CustomLayerTreeView()
+{
+}
 
 void CustomLayerTreeView::addLayer(QgsMapLayer* layer)
 {
@@ -72,7 +76,10 @@ void CustomLayerTreeView::onCustomContextMenuRequested(const QPoint& pos)
     }
 
     QStandardItem* item = m_model->itemFromIndex(index);
+    if (!item) return; // 增加安全检查
     QgsMapLayer* layer = static_cast<QgsMapLayer*>(item->data(LayerPtrRole).value<void*>());
+    if (!layer) return; // 增加安全检查
+
 
     QMenu contextMenu(this);
 
@@ -84,7 +91,7 @@ void CustomLayerTreeView::onCustomContextMenuRequested(const QPoint& pos)
             });
     }
 
-    // --- !! 新增排序功能 !! ---
+    // --- 上移/下移功能 ---
     contextMenu.addSeparator(); // 添加一个分隔线，让UI更清晰
 
     QAction* moveUpAction = contextMenu.addAction("上移一层");
@@ -104,6 +111,11 @@ void CustomLayerTreeView::onCustomContextMenuRequested(const QPoint& pos)
         // 如果是最后一行，则“下移”不可用
         moveDownAction->setEnabled(false);
     }
+
+    // --- !! 新增：删除图层功能 !! ---
+    contextMenu.addSeparator();
+    QAction* removeAction = contextMenu.addAction("删除图层");
+    connect(removeAction, &QAction::triggered, this, [=]() { this->onRemoveLayer(index); });
 
     contextMenu.exec(m_treeView->viewport()->mapToGlobal(pos));
 }
@@ -181,10 +193,48 @@ void CustomLayerTreeView::updateLayerItemIcon(QStandardItem* item, const QColor&
     item->setIcon(QIcon(pixmap));
 }
 
+
+// --- !! 新增的槽函数实现 !! ---
+void CustomLayerTreeView::onRemoveLayer(const QModelIndex& index)
+{
+    if (!index.isValid()) return;
+
+    // 1. 获取图层和Item
+    QStandardItem* item = m_model->itemFromIndex(index);
+    if (!item) return;
+
+    QgsMapLayer* layer = static_cast<QgsMapLayer*>(item->data(LayerPtrRole).value<void*>());
+    if (!layer) return;
+
+    // 2. 弹出确认对话框
+    QMessageBox::StandardButton reply;
+    reply = QMessageBox::question(this, "确认删除", QString("确定要删除图层 '%1' 吗？此操作无法撤销。").arg(layer->name()),
+        QMessageBox::Yes | QMessageBox::No);
+    if (reply == QMessageBox::No) {
+        return;
+    }
+
+    // 3. 从 QGIS 项目中移除图层。
+    //    这一步是核心，它会触发信号，让QGIS框架负责清理图层对象。
+    QgsProject::instance()->removeMapLayer(layer->id());
+
+    // 4. 从我们的视图模型中移除对应的行。
+    //    此时，layer 指针已经是一个“悬垂指针”，QGIS很快会删除它。
+    //    我们绝对不能再使用它，尤其是不能 delete 它。
+    m_model->removeRow(index.row());
+
+    // 5. 更新画布
+    //    在 QGIS 3.x 中，removeMapLayer 信号通常会连接到画布的更新槽，
+    //    所以这一步可能不是必需的，但为了保险起见，可以保留。
+    updateMapCanvasLayers();
+    m_mapCanvas->refresh();
+}
+
 void CustomLayerTreeView::updateMapCanvasLayers()
 {
     QList<QgsMapLayer*> visibleLayers;
-    for (int i = m_model->rowCount() - 1; i >= 0; --i)
+    // 渲染顺序是“从下往上”，所以我们遍历的顺序也应该是从列表底部到顶部
+    for (int i = 0; i < m_model->rowCount(); ++i)
     {
         QStandardItem* item = m_model->item(i);
         if (item && item->checkState() == Qt::Checked)
@@ -192,11 +242,13 @@ void CustomLayerTreeView::updateMapCanvasLayers()
             QVariant layerVariant = item->data(LayerPtrRole);
             if (layerVariant.isValid()) {
                 QgsMapLayer* layer = static_cast<QgsMapLayer*>(layerVariant.value<void*>());
-                visibleLayers.append(layer);
+                // 注意：setLayers的顺序是绘制顺序，列表第一个元素在最底层
+                // 我们模型的顺序是“上层”在第0行，所以需要反向添加
+                visibleLayers.prepend(layer);
             }
         }
     }
     m_mapCanvas->setLayers(visibleLayers);
-    m_mapCanvas->refresh();
+    // m_mapCanvas->refresh(); // setLayers() 内部通常会调用 refresh
     qDebug() << "Map canvas updated with" << visibleLayers.count() << "visible layers.";
 }

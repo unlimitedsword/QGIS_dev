@@ -32,6 +32,7 @@ private slots:
 private:
     void updateMapCanvasLayers();
     void updateLayerItemIcon(QStandardItem* item, const QColor& color);
+    void onRemoveLayer(const QModelIndex& index);
 
 private:
     QTreeView* m_treeView;

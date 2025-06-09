@@ -20,11 +20,12 @@ MapCanvas::MapCanvas(QWidget* parent)
     layout->addWidget(m_qgsCanvas);
     setLayout(layout);
 
+    // 平移工具
     m_panTool = new QgsMapToolPan(m_qgsCanvas);
     m_qgsCanvas->setMapTool(m_panTool);
     m_panTool->setCursor(Qt::OpenHandCursor);
 
-    // --- 关键代码：连接CRS和比例尺信号 ---
+    // --- 连接CRS和比例尺信号 ---
     m_qgsCanvas->setDestinationCrs(QgsProject::instance()->crs());
     connect(QgsProject::instance(), &QgsProject::crsChanged, m_qgsCanvas, [this]() {
         m_qgsCanvas->setDestinationCrs(QgsProject::instance()->crs());
@@ -44,6 +45,12 @@ MapCanvas::~MapCanvas()
 QgsMapCanvas* MapCanvas::getCanvas() const
 {
     return m_qgsCanvas;
+}
+
+// 获取平移工具的实现
+QgsMapToolPan* MapCanvas::getPanTool() const
+{
+    return m_panTool;
 }
 
 void MapCanvas::zoomToLayer(QgsMapLayer* layer)

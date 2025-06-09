@@ -1,12 +1,16 @@
 #include <QtWidgets/QMainWindow>
-#include "MapCanvas.h"
-#include "OutputWidget.h"
-#include "CustomLayerTreeView.h"
-#include <QDockWidget>
 #include <QMenu>
-#include <QMenuBar>
 #include <QAction>
+#include <QDockWidget>
 #include <QToolBar>
+
+
+class MapCanvas;
+class CustomLayerTreeView;
+class OutputWidget;
+class QgsMapTool;
+class FeatureSelectionTool; // 我们自定义的选择工具
+class QActionGroup;       // 用于确保工具按钮的互斥性
 
 class QGIS_dev : public QMainWindow
 {
@@ -16,31 +20,43 @@ public:
     QGIS_dev(QWidget *parent = nullptr);
     ~QGIS_dev();
 
-private:
-    void setupUI();      // 用于创建UI元素的辅助函数
-    void setupActions(); // 用于创建和连接Action的辅助函数
-    void setupToolBar(); // 用于创建工具栏
-
 private slots:
-    // -- 我们将要实现的槽函数 --
+    // -- 将要实现的槽函数 --
     void onAddVectorLayer();
     void onAddRasterLayer();
 
+    // --- 地图工具激活槽函数 ---
+    void onActivatePanTool();
+    void onActivateSelectTool();
+
 private:
-    // -- 原有成员 --
+    // 初始化函数
+    void setupUI();
+    void setupActions();
+    void setupToolBar();
+
+    // UI 组件
     MapCanvas* m_mapCanvas;
+    CustomLayerTreeView* m_customLayerTreeView;
     OutputWidget* m_outputWidget;
-    CustomLayerTreeView* m_customLayerTreeView; // 使用新的成员
+
+    // Dock 窗口
     QDockWidget* m_layerTreeDock;
     QDockWidget* m_outputDock;
 
-    // -- 菜单 --
+    // 菜单和菜单动作
     QMenu* m_fileMenu;
     QAction* m_addVectorAction;
     QAction* m_addRasterAction;
 
-    // -- 工具栏 --
+    // --- 工具栏和工具动作 ---
     QToolBar* m_toolBar;
     QAction* m_zoomInAction;
     QAction* m_zoomOutAction;
+    QAction* m_panAction;           // 平移动作
+    QAction* m_selectAction;        // 选择要素动作
+    QActionGroup* m_toolActionGroup; // 工具动作组
+
+    // --- 地图工具实例 ---
+    FeatureSelectionTool* m_selectionTool;
 };
