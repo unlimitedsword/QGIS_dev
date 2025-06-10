@@ -1,4 +1,5 @@
 #include "CustomLayerTreeView.h"
+#include "Output_Manager.h" // 引入日志管理器
 #include <QTreeView>
 #include <QStandardItemModel>
 #include <QVBoxLayout>
@@ -13,6 +14,7 @@
 #include <QDebug>
 #include <QMessageBox>
 #include <qgsproject.h> // 需要它来移除图层
+
 
 const int LayerPtrRole = Qt::UserRole + 1;
 
@@ -48,6 +50,8 @@ void CustomLayerTreeView::addLayer(QgsMapLayer* layer)
     item->setCheckState(Qt::Checked);
     item->setData(QVariant::fromValue(static_cast<void*>(layer)), LayerPtrRole);
 
+    item->setEditable(true);// 设置为可编辑
+
     QgsVectorLayer* vlayer = qobject_cast<QgsVectorLayer*>(layer);
     if (vlayer) {
         QgsSingleSymbolRenderer* renderer = dynamic_cast<QgsSingleSymbolRenderer*>(vlayer->renderer());
@@ -57,14 +61,33 @@ void CustomLayerTreeView::addLayer(QgsMapLayer* layer)
     }
     
     m_model->appendRow(item);
-    updateMapCanvasLayers();
 }
 
 // 当model的属性改变时立即同步
 void CustomLayerTreeView::onItemChanged(QStandardItem* item)
 {
+    if (!item) return;
+
+    // 获取关联的图层
+    QgsMapLayer* layer = static_cast<QgsMapLayer*>(item->data(LayerPtrRole).value<void*>());
+    if (!layer) return;
+
+    // ==================== 关键修改 2: 处理重命名 ====================
+    // 检查是否是名称发生了变化
+    QString newName = item->text();
+    if (layer->name() != newName) {
+        QString oldName = layer->name();
+        layer->setName(newName); // <<< 核心：更新QGIS图层对象的名称
+        OutputManager::instance()->logMessage(QString("图层 '%1' 已重命名为 '%2'").arg(oldName).arg(newName));
+        emit modelChanged(); // <<< 核心：发出信号，通知主窗口项目已变“脏”
+        return; // 处理完重命名后直接返回，避免下面的逻辑重复执行
+    }
+    // ================================================================
+
+    // 处理可见性变化（原有的逻辑）
     qDebug() << "Item changed:" << item->text() << "Check state:" << item->checkState();
     updateMapCanvasLayers();
+    emit modelChanged(); // 可见性变化也应该标记为“脏”
 }
 
 // 右键菜单
@@ -82,6 +105,13 @@ void CustomLayerTreeView::onCustomContextMenuRequested(const QPoint& pos)
 
 
     QMenu contextMenu(this);
+
+    // ==================== 关键修改 3: 添加重命名动作 ====================
+    QAction* renameAction = contextMenu.addAction("重命名");
+    connect(renameAction, &QAction::triggered, this, [=]() {
+        m_treeView->edit(index); // <<< 核心：以编程方式启动编辑
+        });
+    contextMenu.addSeparator();
 
     // --- 修改颜色功能 (仅对矢量图层) ---
     if (qobject_cast<QgsVectorLayer*>(layer)) {
@@ -120,41 +150,32 @@ void CustomLayerTreeView::onCustomContextMenuRequested(const QPoint& pos)
     contextMenu.exec(m_treeView->viewport()->mapToGlobal(pos));
 }
 
-// !! 新增槽函数的完整实现 !!
 void CustomLayerTreeView::onMoveLayerUp(const QModelIndex& index)
 {
     if (!index.isValid()) return;
-
     int row = index.row();
-    if (row > 0) { // 再次检查，确保不会移动到-1行
-        // 1. 取出当前行
+    if (row > 0) {
         QList<QStandardItem*> rowItems = m_model->takeRow(row);
-        // 2. 将其插入到上一行
         m_model->insertRow(row - 1, rowItems);
-        // 3. 更新画布的图层顺序
         updateMapCanvasLayers();
-        // 4. (可选但推荐) 将选择焦点也移动到新的位置
         m_treeView->setCurrentIndex(m_model->index(row - 1, 0));
+        emit modelChanged(); // <<< 发出信号
     }
 }
 
-// !! 新增槽函数的完整实现 !!
 void CustomLayerTreeView::onMoveLayerDown(const QModelIndex& index)
 {
     if (!index.isValid()) return;
-
     int row = index.row();
-    if (row < m_model->rowCount() - 1) { // 再次检查，确保在有效范围内
-        // 1. 取出当前行
+    if (row < m_model->rowCount() - 1) {
         QList<QStandardItem*> rowItems = m_model->takeRow(row);
-        // 2. 将其插入到下一行
         m_model->insertRow(row + 1, rowItems);
-        // 3. 更新画布的图层顺序
         updateMapCanvasLayers();
-        // 4. (可选但推荐) 将选择焦点也移动到新的位置
         m_treeView->setCurrentIndex(m_model->index(row + 1, 0));
+        emit modelChanged(); // <<< 发出信号
     }
 }
+
 
 void CustomLayerTreeView::onChangeLayerColor(QgsMapLayer* layer)
 {
@@ -179,6 +200,7 @@ void CustomLayerTreeView::onChangeLayerColor(QgsMapLayer* layer)
             QgsMapLayer* itemLayer = static_cast<QgsMapLayer*>(item->data(LayerPtrRole).value<void*>());
             if (itemLayer == layer) {
                 updateLayerItemIcon(item, newColor);
+                emit modelChanged();
                 break;
             }
         }
@@ -251,4 +273,11 @@ void CustomLayerTreeView::updateMapCanvasLayers()
     m_mapCanvas->setLayers(visibleLayers);
     // m_mapCanvas->refresh(); // setLayers() 内部通常会调用 refresh
     qDebug() << "Map canvas updated with" << visibleLayers.count() << "visible layers.";
+}
+
+void CustomLayerTreeView::clear()
+{
+    m_model->clear();
+    m_model->setHorizontalHeaderLabels({ "Layers" });
+    updateMapCanvasLayers(); // 清空画布
 }

@@ -16,9 +16,14 @@ class CustomLayerTreeView : public QWidget
 public:
     explicit CustomLayerTreeView(QgsMapCanvas* canvas, QWidget* parent = nullptr);
     ~CustomLayerTreeView();
+    void updateMapCanvasLayers();
+
+signals:
+    void modelChanged(); // 新增信号
 
 public slots:
     void addLayer(QgsMapLayer* layer);
+    void clear();
 
 private slots:
     void onItemChanged(QStandardItem* item);
@@ -30,7 +35,6 @@ private slots:
     void onMoveLayerDown(const QModelIndex& index);
 
 private:
-    void updateMapCanvasLayers();
     void updateLayerItemIcon(QStandardItem* item, const QColor& color);
     void onRemoveLayer(const QModelIndex& index);
 
