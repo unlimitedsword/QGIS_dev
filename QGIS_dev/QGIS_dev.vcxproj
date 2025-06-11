@@ -40,8 +40,8 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'">
-    <IncludePath>D:\OSG4W\apps\Qt5\include\QtXml;D:\OSG4W\apps\Qt5\include\QtWidgets;D:\OSG4W\apps\Qt5\include\QtGui;D:\OSG4W\apps\Qt5\include\QtCore;D:\OSG4W\apps\qgis-dev\include;$(IncludePath)</IncludePath>
-    <LibraryPath>D:\OSG4W\apps\Qt5\lib;D:\OSG4W\apps\qgis-dev\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)libs\Qt5\include\QtXml;$(SolutionDir)libs\Qt5\include\QtWidgets;$(SolutionDir)libs\Qt5\include\QtGui;$(SolutionDir)libs\Qt5\include\QtCore;$(SolutionDir)libs\qgis-dev\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)libs\Qt5\lib;$(SolutionDir)libs\qgis-dev\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <Link>

@@ -1,0 +1,7 @@
+
+Name: Qt5WebKit
+Description: Qt WebKit module
+Version: 5.212.0
+Libs: -LC:/src/osgeo4w/src/qtwebkit/osgeo4w/install/apps/Qt5/lib -lQt5WebKit
+Cflags: -IC:/src/osgeo4w/src/qtwebkit/osgeo4w/install/apps/Qt5/include/QtWebKit 
+Requires: Qt5Core Qt5Gui Qt5Network
