@@ -1,5 +1,3 @@
-// mapcanvas.cpp
-
 #include "MapCanvas.h"
 #include <qgsmapcanvas.h>
 #include <qgsmaptoolpan.h>

@@ -3,6 +3,44 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+### 以下是新增的Qt特定规则 ###
+
+# Qt构建系统生成的文件
+Makefile*
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.moc
+*.qm
+*.qrc.depends
+*.qrc
+
+# Qt Creator特定文件
+*.autosave
+*.pro.user
+*.pro.user.*
+*.pro.*.user
+*.creator.user.*
+*.pro.user.*
+
+# Qt编译目录
+build-*
+Debug/
+Release/
+debug/
+release/
+__build__/
+bin/
+
+# Qt部署和运行时文件
+*.exe           # 在Qt项目中建议保留，但开发中可忽略生成的可执行文件
+*.ilk
+*.pdb
+*.manifest
+
+### 以下是原始Visual Studio规则（部分保持原样）###
+
 # User-specific files
 *.rsuser
 *.suo
