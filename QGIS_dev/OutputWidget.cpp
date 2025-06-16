@@ -11,7 +11,7 @@ OutputWidget::OutputWidget(QWidget* parent)
     // 输出控制台
     m_outputConsole = new QTextEdit();
     m_outputConsole->setReadOnly(true);
-    m_outputConsole->setWordWrapMode(QTextOption::NoWrap);
+    m_outputConsole->setWordWrapMode(QTextOption::WordWrap);
 
     // 添加布局
     QVBoxLayout* layout = new QVBoxLayout(this);

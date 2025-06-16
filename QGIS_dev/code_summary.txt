@@ -1,0 +1,1932 @@
+正在处理文件: CustomLayerTreeView.cpp
+(CustomLayerTreeView.cpp)
+#include "CustomLayerTreeView.h"
+#include "Output_Manager.h" // 引入日志管理器
+#include <QTreeView>
+#include <QStandardItemModel>
+#include <QVBoxLayout>
+#include <QVariant>
+#include <QMenu>
+#include <QColorDialog>
+#include <QItemSelection>
+#include <qgsmaplayer.h>
+#include <qgsvectorlayer.h>
+#include <qgssinglesymbolrenderer.h>
+#include <qgssymbol.h>
+#include <qgsmapcanvas.h>
+#include <QDebug>
+#include <QMessageBox>
+#include <qgsproject.h> // 需要它来移除图层
+
+
+const int LayerPtrRole = Qt::UserRole + 1;
+
+CustomLayerTreeView::CustomLayerTreeView(QgsMapCanvas* canvas, QWidget* parent)
+    : QWidget(parent), m_mapCanvas(canvas)
+{
+    m_treeView = new QTreeView(this);
+    m_model = new QStandardItemModel(this);
+    m_treeView->setModel(m_model);
+    m_model->setHorizontalHeaderLabels({"Layers"});
+
+    m_treeView->setContextMenuPolicy(Qt::CustomContextMenu);
+
+    connect(m_model, &QStandardItemModel::itemChanged, this, &CustomLayerTreeView::onItemChanged);
+    connect(m_treeView, &QTreeView::customContextMenuRequested, this, &CustomLayerTreeView::onCustomContextMenuRequested);
+    // +++ 连接QTreeView的selectionChanged信号到我们的新槽函数 +++
+    connect(m_treeView->selectionModel(), &QItemSelectionModel::selectionChanged,
+        this, &CustomLayerTreeView::onSelectionChanged);
+
+    QVBoxLayout* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->addWidget(m_treeView);
+    setLayout(layout);
+}
+
+CustomLayerTreeView::~CustomLayerTreeView()
+{
+}
+
+void CustomLayerTreeView::addLayer(QgsMapLayer* layer)
+{
+    if (!layer) return;
+
+    QStandardItem* item = new QStandardItem(layer->name());
+    item->setCheckable(true);
+    item->setCheckState(Qt::Checked);
+    item->setData(QVariant::fromValue(static_cast<void*>(layer)), LayerPtrRole);
+
+    item->setEditable(true);// 设置为可编辑
+
+    QgsVectorLayer* vlayer = qobject_cast<QgsVectorLayer*>(layer);
+    if (vlayer) {
+        QgsSingleSymbolRenderer* renderer = dynamic_cast<QgsSingleSymbolRenderer*>(vlayer->renderer());
+        if (renderer) {
+            updateLayerItemIcon(item, renderer->symbol()->color());
+        }
+    }
+    
+    m_model->appendRow(item);
+}
+
+// 当model的属性改变时立即同步
+void CustomLayerTreeView::onItemChanged(QStandardItem* item)
+{
+    if (!item) return;
+
+    // 获取关联的图层
+    QgsMapLayer* layer = static_cast<QgsMapLayer*>(item->data(LayerPtrRole).value<void*>());
+    if (!layer) return;
+
+    // ==================== 关键修改 2: 处理重命名 ====================
+    // 检查是否是名称发生了变化
+    QString newName = item->text();
+    if (layer->name() != newName) {
+        QString oldName = layer->name();
+        layer->setName(newName); // <<< 核心：更新QGIS图层对象的名称
+        OutputManager::instance()->logMessage(QString("图层 '%1' 已重命名为 '%2'").arg(oldName).arg(newName));
+        emit modelChanged(); // <<< 核心：发出信号，通知主窗口项目已变“脏”
+        return; // 处理完重命名后直接返回，避免下面的逻辑重复执行
+    }
+    // ================================================================
+
+    // 处理可见性变化（原有的逻辑）
+    qDebug() << "Item changed:" << item->text() << "Check state:" << item->checkState();
+    updateMapCanvasLayers();
+    emit modelChanged(); // 可见性变化也应该标记为“脏”
+}
+
+// 右键菜单
+void CustomLayerTreeView::onCustomContextMenuRequested(const QPoint& pos)
+{
+    QModelIndex index = m_treeView->indexAt(pos);
+    if (!index.isValid()) {
+        return;
+    }
+
+    QStandardItem* item = m_model->itemFromIndex(index);
+    if (!item) return; // 增加安全检查
+    QgsMapLayer* layer = static_cast<QgsMapLayer*>(item->data(LayerPtrRole).value<void*>());
+    if (!layer) return; // 增加安全检查
+
+
+    QMenu contextMenu(this);
+
+    // ==================== 关键修改 3: 添加重命名动作 ====================
+    QAction* renameAction = contextMenu.addAction("重命名");
+    connect(renameAction, &QAction::triggered, this, [=]() {
+        m_treeView->edit(index); // <<< 核心：以编程方式启动编辑
+        });
+    contextMenu.addSeparator();
+
+    // --- 修改颜色功能 (仅对矢量图层) ---
+    if (qobject_cast<QgsVectorLayer*>(layer)) {
+        QAction* changeColorAction = contextMenu.addAction("修改颜色...");
+        connect(changeColorAction, &QAction::triggered, this, [=]() {
+            this->onChangeLayerColor(layer);
+            });
+    }
+
+    // --- 上移/下移功能 ---
+    contextMenu.addSeparator(); // 添加一个分隔线，让UI更清晰
+
+    QAction* moveUpAction = contextMenu.addAction("上移一层");
+    QAction* moveDownAction = contextMenu.addAction("下移一层");
+
+    // 连接信号到新的槽函数，使用lambda传递索引
+    connect(moveUpAction, &QAction::triggered, this, [=]() { this->onMoveLayerUp(index); });
+    connect(moveDownAction, &QAction::triggered, this, [=]() { this->onMoveLayerDown(index); });
+
+    // !! 关键的UX逻辑：根据图层位置决定动作是否可用 !!
+    int currentRow = index.row();
+    if (currentRow == 0) {
+        // 如果是第一行，则“上移”不可用
+        moveUpAction->setEnabled(false);
+    }
+    if (currentRow == m_model->rowCount() - 1) {
+        // 如果是最后一行，则“下移”不可用
+        moveDownAction->setEnabled(false);
+    }
+
+    // --- !! 新增：删除图层功能 !! ---
+    contextMenu.addSeparator();
+    QAction* removeAction = contextMenu.addAction("删除图层");
+    connect(removeAction, &QAction::triggered, this, [=]() { this->onRemoveLayer(index); });
+
+    contextMenu.exec(m_treeView->viewport()->mapToGlobal(pos));
+}
+
+void CustomLayerTreeView::onMoveLayerUp(const QModelIndex& index)
+{
+    if (!index.isValid()) return;
+    int row = index.row();
+    if (row > 0) {
+        QList<QStandardItem*> rowItems = m_model->takeRow(row);
+        m_model->insertRow(row - 1, rowItems);
+        updateMapCanvasLayers();
+        m_treeView->setCurrentIndex(m_model->index(row - 1, 0));
+        emit modelChanged(); // <<< 发出信号
+    }
+}
+
+void CustomLayerTreeView::onMoveLayerDown(const QModelIndex& index)
+{
+    if (!index.isValid()) return;
+    int row = index.row();
+    if (row < m_model->rowCount() - 1) {
+        QList<QStandardItem*> rowItems = m_model->takeRow(row);
+        m_model->insertRow(row + 1, rowItems);
+        updateMapCanvasLayers();
+        m_treeView->setCurrentIndex(m_model->index(row + 1, 0));
+        emit modelChanged(); // <<< 发出信号
+    }
+}
+
+
+void CustomLayerTreeView::onChangeLayerColor(QgsMapLayer* layer)
+{
+    QgsVectorLayer* vectorLayer = qobject_cast<QgsVectorLayer*>(layer);
+    if (!vectorLayer) return;
+
+    // !! 修正: 对非QObject的类使用 dynamic_cast !!
+    QgsSingleSymbolRenderer* renderer = dynamic_cast<QgsSingleSymbolRenderer*>(vectorLayer->renderer());
+    if (!renderer) {
+        qDebug() << "Cannot change color: layer does not use a single symbol renderer.";
+        return;
+    }
+    
+    const QColor newColor = QColorDialog::getColor(renderer->symbol()->color(), this, "选择新颜色");
+
+    if (newColor.isValid()) {
+        renderer->symbol()->setColor(newColor);
+        vectorLayer->triggerRepaint();
+
+        for (int i = 0; i < m_model->rowCount(); ++i) {
+            QStandardItem* item = m_model->item(i);
+            QgsMapLayer* itemLayer = static_cast<QgsMapLayer*>(item->data(LayerPtrRole).value<void*>());
+            if (itemLayer == layer) {
+                updateLayerItemIcon(item, newColor);
+                emit modelChanged();
+                break;
+            }
+        }
+    }
+}
+
+void CustomLayerTreeView::updateLayerItemIcon(QStandardItem* item, const QColor& color)
+{
+    if (!item) return;
+    QPixmap pixmap(16, 16);
+    pixmap.fill(color);
+    item->setIcon(QIcon(pixmap));
+}
+
+
+// --- !! 新增的槽函数实现 !! ---
+void CustomLayerTreeView::onRemoveLayer(const QModelIndex& index)
+{
+    if (!index.isValid()) return;
+
+    // 1. 获取图层和Item
+    QStandardItem* item = m_model->itemFromIndex(index);
+    if (!item) return;
+
+    QgsMapLayer* layer = static_cast<QgsMapLayer*>(item->data(LayerPtrRole).value<void*>());
+    if (!layer) return;
+
+    // 2. 弹出确认对话框
+    QMessageBox::StandardButton reply;
+    reply = QMessageBox::question(this, "确认删除", QString("确定要删除图层 '%1' 吗？此操作无法撤销。").arg(layer->name()),
+        QMessageBox::Yes | QMessageBox::No);
+    if (reply == QMessageBox::No) {
+        return;
+    }
+
+    // 3. 从 QGIS 项目中移除图层。
+    //    这一步是核心，它会触发信号，让QGIS框架负责清理图层对象。
+    QgsProject::instance()->removeMapLayer(layer->id());
+
+    // 4. 从我们的视图模型中移除对应的行。
+    //    此时，layer 指针已经是一个“悬垂指针”，QGIS很快会删除它。
+    //    我们绝对不能再使用它，尤其是不能 delete 它。
+    m_model->removeRow(index.row());
+
+    // 5. 更新画布
+    //    在 QGIS 3.x 中，removeMapLayer 信号通常会连接到画布的更新槽，
+    //    所以这一步可能不是必需的，但为了保险起见，可以保留。
+    updateMapCanvasLayers();
+    m_mapCanvas->refresh();
+}
+
+void CustomLayerTreeView::updateMapCanvasLayers()
+{
+    QList<QgsMapLayer*> visibleLayers;
+    // 渲染顺序是“从下往上”，所以我们遍历的顺序也应该是从列表底部到顶部
+    for (int i = 0; i < m_model->rowCount(); ++i)
+    {
+        QStandardItem* item = m_model->item(i);
+        if (item && item->checkState() == Qt::Checked)
+        {
+            QVariant layerVariant = item->data(LayerPtrRole);
+            if (layerVariant.isValid()) {
+                QgsMapLayer* layer = static_cast<QgsMapLayer*>(layerVariant.value<void*>());
+                // 注意：setLayers的顺序是绘制顺序，列表第一个元素在最底层
+                // 我们模型的顺序是“上层”在第0行，所以需要反向添加
+                visibleLayers.prepend(layer);
+            }
+        }
+    }
+    m_mapCanvas->setLayers(visibleLayers);
+    // m_mapCanvas->refresh(); // setLayers() 内部通常会调用 refresh
+    qDebug() << "Map canvas updated with" << visibleLayers.count() << "visible layers.";
+}
+
+void CustomLayerTreeView::clear()
+{
+    m_model->clear();
+    m_model->setHorizontalHeaderLabels({ "Layers" });
+    updateMapCanvasLayers(); // 清空画布
+}
+
+// +++ 实现新槽函数的逻辑 +++
+void CustomLayerTreeView::onSelectionChanged(const QItemSelection& selected, const QItemSelection& deselected)
+{
+
+    Q_UNUSED(deselected); // 不关心之前选中的是什么
+
+    QModelIndexList indexes = selected.indexes();
+    if (indexes.isEmpty()) {
+        // 如果没有选中任何项（例如，清空图层后），发出一个nullptr信号
+        emit currentLayerChanged(nullptr);
+        return;
+    }
+
+    // 通常我们只关心第一个被选中的项
+    QModelIndex currentIndex = indexes.first();
+    QStandardItem* item = m_model->itemFromIndex(currentIndex);
+    if (item) {
+        QgsMapLayer* layer = static_cast<QgsMapLayer*>(item->data(LayerPtrRole).value<void*>());
+        // 发出信号，将当前选中的图层指针传递出去
+        emit currentLayerChanged(layer);
+    }
+}
+
+正在处理文件: FeatureSelectionTool.cpp
+(FeatureSelectionTool.cpp)
+#include "featureselectiontool.h"
+#include <qgsmapcanvas.h>
+#include <qgsvectorlayer.h>
+#include <qgsfeature.h>
+#include <qgsproject.h>
+#include <qgsmaplayer.h>
+#include <qgsapplication.h>
+
+#include <QToolTip> // 使用 Qt 的工具提示
+
+FeatureSelectionTool::FeatureSelectionTool(QgsMapCanvas* canvas)
+    : QgsMapToolIdentify(canvas)
+{
+    this->setCursor(Qt::ArrowCursor);
+}
+
+// 当工具被激活时，重置状态
+void FeatureSelectionTool::activate()
+{
+    QgsMapTool::activate();
+    clearCurrentSelection();
+}
+
+// 当工具被停用时，清理所有状态
+void FeatureSelectionTool::deactivate()
+{
+    QgsMapTool::deactivate();
+    clearCurrentSelection();
+    QToolTip::hideText();
+}
+
+// 新的核心逻辑：鼠标移动事件
+void FeatureSelectionTool::canvasMoveEvent(QgsMapMouseEvent* e)
+{
+    // 识别鼠标下的要素
+    QList<IdentifyResult> results = this->identify(e->x(), e->y(), IdentifyMode::TopDownAll);
+
+    if (results.isEmpty())
+    {
+        // 如果鼠标下没有要素，隐藏提示
+        QToolTip::hideText();
+        return;
+    }
+
+    // 只处理最顶层的矢量图层结果
+    IdentifyResult topResult = results.first();
+    QgsMapLayer* layer = topResult.mLayer;
+    QgsFeature feature = topResult.mFeature;
+
+    QgsVectorLayer* vlayer = qobject_cast<QgsVectorLayer*>(layer);
+    if (!vlayer || !feature.isValid())
+    {
+        QToolTip::hideText();
+        return;
+    }
+
+    // 获取要素的 "name" 属性
+    QString displayName;
+    int nameFieldIndex = vlayer->fields().indexOf("name");
+    if (nameFieldIndex != -1) {
+        displayName = feature.attribute("name").toString();
+    }
+    else {
+        displayName = QString("ID: %1").arg(feature.id());
+    }
+
+    // 显示提示信息
+    if (!displayName.isEmpty()) {
+        QString tipText = QString("<b>名称:</b><br>%1").arg(displayName);
+        QPoint globalPos = canvas()->mapToGlobal(e->pos());
+        QToolTip::showText(globalPos, tipText, canvas());
+    }
+}
+
+
+// 我们保留点击事件，用于真正“选定”和高亮要素
+void FeatureSelectionTool::canvasReleaseEvent(QgsMapMouseEvent* e)
+{
+    QList<IdentifyResult> results = this->identify(e->x(), e->y(), IdentifyMode::TopDownAll);
+
+    // 先清除之前的选择
+    clearCurrentSelection();
+
+    if (results.isEmpty()) {
+        canvas()->refresh();
+        return;
+    }
+
+    // 只处理最顶层的矢量图层结果
+    IdentifyResult topResult = results.first();
+    QgsMapLayer* layer = topResult.mLayer;
+    QgsFeature feature = topResult.mFeature;
+
+    QgsVectorLayer* vlayer = qobject_cast<QgsVectorLayer*>(layer);
+    if (!vlayer || !feature.isValid()) {
+        canvas()->refresh();
+        return;
+    }
+
+    // 在图层上选择该要素，使其高亮
+    vlayer->select(feature.id());
+
+    // 记录下这次选择，方便之后清除
+    m_lastSelectedLayer = vlayer;
+    m_lastSelectedFeatureId = feature.id();
+}
+
+// 辅助函数，用于清除当前的选择
+void FeatureSelectionTool::clearCurrentSelection()
+{
+    if (m_lastSelectedLayer)
+    {
+        m_lastSelectedLayer->deselect(m_lastSelectedFeatureId);
+        m_lastSelectedLayer = nullptr;
+    }
+    else
+    {
+        // 如果没有特定记录，则作为备用方案，清除所有图层的选择
+        QList<QgsMapLayer*> layers = QgsProject::instance()->mapLayers().values();
+        for (QgsMapLayer* layer : layers) {
+            // 使用动态类型检查来确保图层是矢量图层
+            QgsVectorLayer* vectorLayer = qobject_cast<QgsVectorLayer*>(layer);
+            if (vectorLayer) {
+                vectorLayer->removeSelection();
+            }
+        }
+    }
+}
+正在处理文件: FileLogger.cpp
+(FileLogger.cpp)
+#pragma once
+#include "FileLogger.h"
+#include <QDateTime>
+#include <QDebug>
+
+FileLogger::FileLogger(const QString& logFilePath, QObject* parent)
+    : QObject(parent)
+{
+    m_logFile.setFileName(logFilePath);
+
+    // 以追加模式打开文件，这样即使程序快速重启也不会覆盖日志
+    // QIODevice::Text 会自动处理不同操作系统下的换行符
+    if (!m_logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text))
+    {
+        qWarning() << "无法打开日志文件进行写入:" << logFilePath;
+        return;
+    }
+
+    // 将文本流与文件关联
+    m_logStream.setDevice(&m_logFile);
+    // 确保使用UTF-8编码，以支持中文字符
+    m_logStream.setCodec("UTF-8");
+
+    // (可选) 在日志文件开头写入一条启动信息
+    QString startMessage = QString("===== 日志开始于 %1 =====\n")
+        .arg(QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss"));
+    m_logStream << startMessage;
+    m_logStream.flush(); // 立即写入
+}
+
+FileLogger::~FileLogger()
+{
+    // 在对象销毁时，确保所有缓冲数据都已写入文件并关闭文件
+    if (m_logFile.isOpen()) {
+        m_logStream.flush();
+        m_logFile.close();
+    }
+}
+
+void FileLogger::onMessageLogged(const QString& message, const QString& type)
+{
+    if (!m_logFile.isOpen()) {
+        return; // 如果文件未成功打开，则不执行任何操作
+    }
+
+    // 格式化日志条目，与您在OutputWidget中的格式完全一致
+    QString formattedMessage = QString("[%1][%2] %3")
+        .arg(QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss"))
+        .arg(type)
+        .arg(message);
+
+    // 将格式化后的消息写入文件流，并添加换行符
+    m_logStream << formattedMessage << Qt::endl;
+}
+正在处理文件: main.cpp
+(main.cpp)
+// main.cpp (最终正确且逻辑无误的诊断版本)
+
+#pragma warning(disable:4996)
+#include "QGIS_dev.h"
+#include "FileLogger.h"
+#include "Output_Manager.h"
+#include <QTextCodec>
+#include <QDir>
+#include <QDateTime>
+#include <qgsapplication.h>
+#include <qgscoordinatereferencesystem.h>
+#include <qgsproviderregistry.h>
+#include <qdebug.h>
+#include <QMessageBox>
+
+// 一个简单的函数，用于在屏幕上显示诊断信息
+void showDiagnosis(const QString& title, const QString& message) {
+    qDebug() << "---" << title << "---";
+    qDebug() << message;
+    QMessageBox::information(nullptr, title, message);
+}
+
+int main(int argc, char* argv[])
+{
+    // === STAGE 1: 创建QApplication实例 ===
+    // 这是所有UI操作的前提，必须是第一步。
+    QgsApplication a(argc, argv, true);
+    qDebug() << "STAGE 1 PASSED: QgsApplication instance created.";
+
+    // === STAGE 2: 强制设置环境变量 ===
+    // 此时 QApplication 已存在，但 QGIS 核心还未初始化。
+    // 这是设置环境变量的最佳时机。
+    QString prefixPath = QgsApplication::applicationDirPath();
+
+    // 使用 Qt 的 qputenv，它更安全
+    // 它在内部处理了字符串的生命周期问题
+    qputenv("PROJ_LIB", QDir::toNativeSeparators(prefixPath + "/share/proj").toLocal8Bit());
+    qputenv("GDAL_DATA", QDir::toNativeSeparators(prefixPath + "/share/gdal").toLocal8Bit());
+    qputenv("QT_PLUGIN_PATH", QDir::toNativeSeparators(prefixPath + "/plugins").toLocal8Bit());
+
+    // 添加核心DLL目录到PATH，以防万一
+    QByteArray pathEnv = qgetenv("PATH");
+    QString newPath = QDir::toNativeSeparators(prefixPath) + ";" + pathEnv;
+    qputenv("PATH", newPath.toLocal8Bit());
+
+    // === STAGE 3: 初始化QGIS核心 ===
+    // 此时环境变量已设置完毕，initQgis() 会在正确的环境下运行
+    QgsApplication::setPrefixPath(prefixPath, true); // 仍然建议设置，因为它影响QGIS内部的其他路径逻辑
+    QgsApplication::initQgis();
+    qDebug() << "STAGE 3: QGIS Init 完成";
+
+    // === STAGE 4: 关键功能测试 - CRS创建 ===
+    QgsCoordinateReferenceSystem testCrs("EPSG:4326");
+    if (testCrs.isValid()) {
+        qDebug() << "STAGE 4: CRS Test - SUCCESS! 'EPSG:4326' created. Problem solved!";
+    }
+    else {
+        qDebug() << "STAGE 4: CRS Test - FAILURE! Still cannot create CRS. This indicates a fundamental DLL or data file version mismatch.";
+        return -1;
+    }
+
+    // === STAGE 5: 启动主程序 ===
+    qDebug() << "All checks passed. Starting main application...";
+
+    int result = 0;
+    {
+        QGIS_dev w;
+        w.setMinimumSize(1920, 1080);
+        w.show();
+
+        // 日志系统现在可以安全初始化并使用了
+        QDir logDir(QApplication::applicationDirPath());
+        logDir.cdUp(); 
+        logDir.cdUp();
+        logDir.mkdir("logs");
+        if (logDir.exists("logs")) {
+            logDir.cd("logs");
+        }
+        QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd-HH-mm");
+        QString logFilePath = logDir.filePath(timestamp + ".log");
+        FileLogger* fileLogger = new FileLogger(logFilePath, &a);
+        QObject::connect(OutputManager::instance(), &OutputManager::messageLogged, fileLogger, &FileLogger::onMessageLogged);
+        OutputManager::instance()->logMessage("应用程序启动成功。");
+
+        result = a.exec();
+    }
+
+    QgsApplication::exitQgis();
+    return result;
+}
+
+正在处理文件: MapCanvas.cpp
+(MapCanvas.cpp)
+#include "MapCanvas.h"
+#include <qgsmapcanvas.h>
+#include <qgsmaptoolpan.h>
+#include <qgsproject.h>
+#include <qgsmaplayer.h>
+#include <QVBoxLayout>
+#include <QDebug>
+
+MapCanvas::MapCanvas(QWidget* parent)
+    : QWidget(parent)
+{
+    m_qgsCanvas = new QgsMapCanvas();
+    m_qgsCanvas->setCanvasColor(Qt::white);
+    m_qgsCanvas->enableAntiAliasing(true);
+
+    QVBoxLayout* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->addWidget(m_qgsCanvas);
+    setLayout(layout);
+
+    // 平移工具
+    m_panTool = new QgsMapToolPan(m_qgsCanvas);
+    m_qgsCanvas->setMapTool(m_panTool);
+    m_panTool->setCursor(Qt::OpenHandCursor);
+
+    // ====================== 核心修正 ======================
+    // 删除所有主动设置 QgsProject::instance()->setCrs() 的代码。
+    // MapCanvas 的职责：只做一件事 —— 忠实地跟随 QgsProject 的CRS。
+
+    // 1. 启动时，将自己的目标CRS设置为当前项目的CRS (此时可能无效)
+    m_qgsCanvas->setDestinationCrs(QgsProject::instance()->crs());
+
+    // 2. 建立一个永久的连接：只要项目CRS变了，画布就跟着变。
+    connect(QgsProject::instance(), &QgsProject::crsChanged,
+        m_qgsCanvas, [this]() {
+            m_qgsCanvas->setDestinationCrs(QgsProject::instance()->crs());
+        });
+
+    // ========================================================
+
+    // 连接比例尺信号 (这部分不变)
+    connect(m_qgsCanvas, &QgsMapCanvas::scaleChanged, this, &MapCanvas::onCanvasScaleChanged);
+    onCanvasScaleChanged(m_qgsCanvas->scale());
+}
+
+MapCanvas::~MapCanvas()
+{
+}
+
+QgsMapCanvas* MapCanvas::getCanvas() const
+{
+    return m_qgsCanvas;
+}
+
+// 获取平移工具的实现
+QgsMapToolPan* MapCanvas::getPanTool() const
+{
+    return m_panTool;
+}
+
+void MapCanvas::zoomToLayer(QgsMapLayer* layer)
+{
+    if (layer && layer->isValid()) {
+        m_qgsCanvas->setExtent(layer->extent());
+        m_qgsCanvas->refresh();
+        // 注意：setExtent会自动改变比例尺，从而触发scaleChanged信号，所以这里无需额外操作
+    }
+}
+
+// --- 新增接口的实现 ---
+
+void MapCanvas::zoomIn()
+{
+    if (m_qgsCanvas) {
+        m_qgsCanvas->zoomIn(); // 将调用传递给QGIS画布
+    }
+}
+
+void MapCanvas::zoomOut()
+{
+    if (m_qgsCanvas) {
+        m_qgsCanvas->zoomOut(); // 将调用传递给QGIS画布
+    }
+}
+
+// --- 新增私有槽的实现 ---
+
+void MapCanvas::onCanvasScaleChanged(double newScale)
+{
+    // 将double类型的比例尺分母格式化为 "1:XXXXX" 的字符串
+    QString formattedScale = QString("比例尺 1:%1").arg(static_cast<int>(newScale));
+
+    // 发射我们自己的、携带格式化字符串的信号
+    emit scaleChanged(formattedScale);
+    qDebug() << "Scale changed to:" << formattedScale;
+}
+正在处理文件: OutputWidget.cpp
+(OutputWidget.cpp)
+#include "Output_Manager.h"
+#include <OutputWidget.h>
+#include <QTextEdit>
+#include <QVBoxLayout>
+#include <QDateTime>
+#include <QString>
+
+OutputWidget::OutputWidget(QWidget* parent)
+	: QWidget(parent)
+{
+    // 输出控制台
+    m_outputConsole = new QTextEdit();
+    m_outputConsole->setReadOnly(true);
+    m_outputConsole->setWordWrapMode(QTextOption::WordWrap);
+
+    // 添加布局
+    QVBoxLayout* layout = new QVBoxLayout(this);
+    layout->addWidget(m_outputConsole);
+    setLayout(layout);
+
+    QString testMessage = "This is a test message!";
+    m_outputConsole->append(testMessage);
+    connect(OutputManager::instance(), &OutputManager::messageLogged, this, &OutputWidget::displayMessage);
+}
+
+void OutputWidget::displayMessage(const QString& message,const QString& type) {
+    QString formattedMessage = QString("[%1] [%2] %3").arg(QDateTime::currentDateTime().toString("yyyy-MM-ddhh:mm:ss")).arg(type).arg(message);
+    m_outputConsole->append(formattedMessage);
+}
+
+OutputWidget::~OutputWidget() {
+
+}
+正在处理文件: Output_Manager.cpp
+(Output_Manager.cpp)
+#include "Output_Manager.h"
+#include <QDebug>
+
+OutputManager* OutputManager::m_instance = nullptr;
+
+
+OutputManager::OutputManager(QObject* parent)
+	:	QObject(parent) 
+{
+	qDebug() << "OutputManager instance created.";
+}
+
+OutputManager* OutputManager::instance()
+{
+	if (!m_instance) {
+		m_instance = new OutputManager();
+	}
+	return m_instance;
+}
+
+void OutputManager::logMessage(const QString& message) {
+	emit messageLogged(message, "INFO");
+}
+
+void OutputManager::logWarning(const QString& message) {
+	emit messageLogged(message, "WARNING");
+}
+
+void OutputManager::logError(const QString& message) {
+	emit messageLogged(message, "ERROR");
+}
+
+
+正在处理文件: QGIS_dev.cpp
+(QGIS_dev.cpp)
+#include "QGIS_dev.h"
+#include "Output_Manager.h"
+#include "MapCanvas.h"
+#include "OutputWidget.h"
+#include "CustomLayerTreeView.h"
+#include "FeatureSelectionTool.h"
+
+#include <QDockWidget>
+#include <QMenu>
+#include <QMenuBar>
+#include <QAction>
+#include <QToolBar>
+#include <QFileInfo>
+#include <QDebug>
+#include <QFileDialog> // 用于文件对话框
+#include <QDir>        // 用于获取默认路径
+#include <QMessageBox>
+#include <QLabel>
+#include <QStatusBar>
+#include <QPushButton> // 添加此行以包含 QPushButton 的完整定义
+#include <QProcess>
+#include <QUrl>
+#include <QUrlQuery>
+#include <qgsvectorlayer.h>
+#include <qgsrasterlayer.h> // 需要包含栅格图层头文件
+#include <qgslayertree.h>
+#include <qgsproject.h>
+#include <qgsmaptoolpan.h>
+#include <qgsMapLayer.h>
+#include <qgsapplication.h> // 添加此行以包含 QgsApplication 的完整定义
+#include <qgsprojectionselectiondialog.h>
+
+
+
+QGIS_dev::QGIS_dev(QWidget *parent)
+    : QMainWindow(parent), m_isProjectDirty(false),m_currentLayer(nullptr) // 初始化项目状态
+{
+    // 调用辅助函数来创建和设置UI
+    setupUI();
+    setupActions();
+    setupToolBar();
+
+    // 默认激活平移工具
+    m_panAction->setChecked(true);
+    onActivatePanTool(); // 确保程序启动时，平移工具是激活状态
+
+    // 连接 CustomLayerTreeView 的修改信号，以更新“脏”状态
+    // (这需要在 CustomLayerTreeView 中添加一个信号)
+    connect(m_customLayerTreeView, &CustomLayerTreeView::modelChanged, this, &QGIS_dev::onProjectDirty);
+
+    // 在 QGIS_dev 构造函数中
+
+    connect(QgsProject::instance(), &QgsProject::layersAdded, this, &QGIS_dev::onProjectDirty);
+    connect(QgsProject::instance(), &QgsProject::layersAdded, this, [this](const QList<QgsMapLayer*>& layers) {
+        for (QgsMapLayer* layer : layers) {
+            // 在rebuildLayerTreeFromProject中已经有这个逻辑了，
+            // layersAdded 信号应该只用来触发UI更新，而不是直接添加
+            m_customLayerTreeView->addLayer(layer);
+        }
+        // 关键修改：添加图层后，手动更新一次画布，确保显示
+        m_customLayerTreeView->updateMapCanvasLayers();
+        });
+    connect(QgsProject::instance(), QOverload<const QStringList&>::of(&QgsProject::layersWillBeRemoved), this, [this]() {
+        this->onProjectDirty();
+        });
+
+    // 关键：连接地图画布的信号到新槽函数
+    QgsMapCanvas* canvas = m_mapCanvas->getCanvas();
+    connect(m_mapCanvas->getCanvas(), &QgsMapCanvas::scaleChanged, this, &QGIS_dev::updateScale);
+    connect(canvas, &QgsMapCanvas::xyCoordinates, this, &QGIS_dev::updateCoordinates);
+    connect(canvas, &QgsMapCanvas::scaleChanged, this, &QGIS_dev::updateScale);
+
+    // +++ 将图层树的选中事件连接到主窗口的槽 +++
+    connect(m_customLayerTreeView, &CustomLayerTreeView::currentLayerChanged,
+        this, &QGIS_dev::onCurrentLayerChanged);
+
+    // ====================== 核心修改 ======================
+    // 1. 连接 QgsProject 的 crsChanged 信号到我们的新槽函数
+    connect(QgsProject::instance(), &QgsProject::crsChanged, this, &QGIS_dev::updateProjectCrs);
+
+    // 2. 在程序启动时，手动调用一次，以显示初始的CRS状态
+    updateProjectCrs();
+    // ========================================================
+
+    updateWindowTitle();
+
+    updateScale(m_mapCanvas->getCanvas()->scale());
+}
+
+QGIS_dev::~QGIS_dev()
+{
+}
+
+// ---在此设置所有窗口UI---
+void QGIS_dev::setupUI()
+{
+    // 创建核心组件
+    m_mapCanvas = new MapCanvas(this); // MapCanvas保持不变
+
+    // 将地图画布的指针传递给它
+    m_customLayerTreeView = new CustomLayerTreeView(m_mapCanvas->getCanvas(), this);
+
+    m_outputWidget = new OutputWidget(this);
+
+    setCentralWidget(m_mapCanvas);
+
+    // 将我们的 customLayerTreeView 放入DockWidget
+    m_layerTreeDock = new QDockWidget("图层 (自定义)", this);
+    m_layerTreeDock->setWidget(m_customLayerTreeView);
+    addDockWidget(Qt::LeftDockWidgetArea, m_layerTreeDock);
+
+    // ====================== 核心修改：创建两个右侧Dock ======================
+    // a. 创建“空间分析”Dock
+    m_analysisToolsWidget = new QWidget(this); // (占位符 Widget)
+    QVBoxLayout* analysisLayout = new QVBoxLayout(m_analysisToolsWidget);
+    analysisLayout->addWidget(new QLabel("空间分析工具将在此处...", m_analysisToolsWidget));
+    analysisLayout->addStretch();
+    m_analysisToolsWidget->setLayout(analysisLayout);
+
+    m_analysisDock = new QDockWidget("空间分析", this);
+    m_analysisDock->setWidget(m_analysisToolsWidget);
+
+    // b. 创建“输出”Dock
+    m_outputDock = new QDockWidget("输出", this);
+    m_outputDock->setWidget(m_outputWidget);
+
+    // c. 先添加上面的（分析），再添加下面的（输出）
+    addDockWidget(Qt::RightDockWidgetArea, m_analysisDock);
+    addDockWidget(Qt::RightDockWidgetArea, m_outputDock);
+
+    // d. 将它们垂直排列
+    //    如果它们默认是tab页，就用 splitDockWidget 强制拆分
+    //    通常后一个add会放在前一个的下面，但如果不是，就用split
+    splitDockWidget(m_analysisDock, m_outputDock, Qt::Vertical);
+
+    // 在 setupUI 函数的最后
+    m_analysisDock->setMinimumWidth(350);
+    m_outputDock->setMinimumWidth(350);
+
+    // =======================================================================
+    
+    // 创建菜单栏
+    m_fileMenu = menuBar()->addMenu("文件(&F)"); // &F 设置快捷键 Alt+F
+    m_checkMenu = menuBar()->addMenu("查看(&C)");
+
+    // 创建工具栏
+    m_toolBar = new QToolBar(this);
+    addToolBar(Qt::TopToolBarArea, m_toolBar);
+    m_toolBar->setFloatable(false);       // 设置是否浮动
+    m_toolBar->setMovable(false);         // 设置工具栏不允许移动
+
+    // 新增：设置状态栏 
+    QStatusBar* sb = statusBar(); // 获取主窗口的状态栏
+
+    // 创建坐标标签
+    m_coordsLabel = new QLabel("坐标: (移动鼠标查看)", this);
+    m_coordsLabel->setMinimumWidth(250); // 设置一个最小宽度，防止跳动
+    m_coordsLabel->setFrameShape(QFrame::StyledPanel); // 可选：添加边框使其更像QGIS
+    m_coordsLabel->setFrameShadow(QFrame::Sunken);
+
+    // 创建比例尺标签
+    m_scaleLabel = new QLabel("比例尺: N/A", this);
+    m_scaleLabel->setMinimumWidth(150);
+    m_scaleLabel->setFrameShape(QFrame::StyledPanel);
+    m_scaleLabel->setFrameShadow(QFrame::Sunken);
+
+    // 将标签作为永久部件添加到状态栏（这样它们就不会被临时消息覆盖）
+    sb->addPermanentWidget(m_coordsLabel);
+    sb->addPermanentWidget(m_scaleLabel);
+
+    // ====================== 核心修改：创建 QPushButton ======================
+    m_crsButton = new QPushButton("未知坐标系", this);
+    m_crsButton->setToolTip("点击以更改项目的坐标参考系(CRS)");
+    m_crsButton->setFlat(true); // 让它看起来像个标签，但可以点击
+    m_crsButton->setCursor(Qt::PointingHandCursor); // 鼠标悬停时显示手形
+    connect(m_crsButton, &QPushButton::clicked, this, &QGIS_dev::onChangeProjectCrs);
+
+    sb->addPermanentWidget(m_crsButton);
+}
+
+// ---在此设置所有的菜单栏---
+void QGIS_dev::setupActions()
+{
+    // 创建“添加矢量图层”动作
+    m_addVectorAction = new QAction("添加矢量图层", this);
+    m_addVectorAction->setStatusTip("从文件加载一个矢量图层 (如: .shp)");
+    connect(m_addVectorAction, &QAction::triggered, this, &QGIS_dev::onAddVectorLayer);
+
+    // 创建“添加栅格图层”动作
+    m_addRasterAction = new QAction("添加栅格图层", this);
+    m_addRasterAction->setStatusTip("从文件加载一个栅格图层 (如: .tif)");
+    connect(m_addRasterAction, &QAction::triggered, this, &QGIS_dev::onAddRasterLayer);
+
+    // ====================== 新增动作 ======================
+   // 创建“添加分隔符文本图层”动作
+    m_addDelimitedTextLayerAction = new QAction("添加分隔符文本图层...", this);
+    m_addDelimitedTextLayerAction->setStatusTip("从CSV或其他文本文件加载点图层");
+    connect(m_addDelimitedTextLayerAction, &QAction::triggered, this, &QGIS_dev::onAddDelimitedTextLayer);
+    // ======================================================
+
+    // 新建项目动作
+    m_newAction = new QAction("新建项目", this);
+    m_newAction->setShortcut(QKeySequence::New);
+    connect(m_newAction, &QAction::triggered, this, &QGIS_dev::onNewProject);
+
+    // 打开项目动作
+    m_openAction = new QAction("打开项目...", this);
+    m_openAction->setShortcut(QKeySequence::Open);
+    connect(m_openAction, &QAction::triggered, this, &QGIS_dev::onOpenProject);
+
+    // 保存项目动作
+    m_saveAction = new QAction("保存项目", this);
+    m_saveAction->setShortcut(QKeySequence::Save);
+    connect(m_saveAction, &QAction::triggered, this, &QGIS_dev::onSaveProject);
+
+    // 另存为动作
+    m_saveAsAction = new QAction("项目另存为...", this);
+    m_saveAsAction->setShortcut(QKeySequence::SaveAs);
+    connect(m_saveAsAction, &QAction::triggered, this, &QGIS_dev::onSaveProjectAs);
+
+    // 将新动作添加到菜单栏
+    m_fileMenu->addAction(m_newAction);
+    m_fileMenu->addAction(m_openAction);
+    m_fileMenu->addAction(m_saveAction);
+    m_fileMenu->addAction(m_saveAsAction);
+    m_fileMenu->addSeparator();
+    m_fileMenu->addAction(m_addVectorAction);
+    m_fileMenu->addAction(m_addRasterAction);
+    m_fileMenu->addAction(m_addDelimitedTextLayerAction);
+
+    m_checkLogsAction = new QAction("日志", this);
+    connect(m_checkLogsAction, &QAction::triggered, this, &QGIS_dev::onOpenLogFolder);
+    m_checkMenu->addAction(m_checkLogsAction); // 假设你想加到“查看”菜单
+
+}
+
+// ---- 新的项目管理槽函数 ----
+
+// **修改 onNewProject 函数**
+// QgsProject::clear() 也会发出 crsChanged 信号，所以也无需手动调用
+void QGIS_dev::onNewProject()
+{
+    if (maybeSave()) {
+        QgsProject::instance()->clear();
+
+        QgsCoordinateReferenceSystem defaultCrs("EPSG:4326");
+        if (defaultCrs.isValid()) {
+            QgsProject::instance()->setCrs(defaultCrs);
+        }
+
+        // 强制处理事件队列，确保UI更新
+        QApplication::processEvents();
+
+        m_customLayerTreeView->clear();
+        m_projectFilePath.clear();
+        m_isProjectDirty = false;
+        updateWindowTitle();
+        OutputManager::instance()->logMessage("新项目已创建，默认CRS为WGS 84。");
+    }
+}
+
+// **修改 onOpenProject 函数**
+// 在成功读取项目后，我们不需要手动调用 updateProjectCrs，因为 QgsProject::read() 
+// 会自动设置新的CRS，并发出 crsChanged 信号，从而自动触发我们的槽函数。
+void QGIS_dev::onOpenProject()
+{
+    if (maybeSave()) {
+        QString filePath = QFileDialog::getOpenFileName(this, "打开QGIS项目", QDir::homePath(), "QGIS Projects (*.qgz *.qgs)");
+        if (filePath.isEmpty()) return;
+
+        QgsProject::instance()->clear();
+        m_customLayerTreeView->clear();
+
+        if (QgsProject::instance()->read(filePath)) {
+            m_projectFilePath = filePath;
+            rebuildLayerTreeFromProject();
+            m_isProjectDirty = false;
+            updateWindowTitle();
+            OutputManager::instance()->logMessage("项目已打开: " + filePath);
+            // **注意**: 这里不需要手动调用 updateProjectCrs()
+        }
+        else {
+            QMessageBox::critical(this, "错误", "无法读取项目文件: " + filePath);
+            m_projectFilePath.clear();
+            updateWindowTitle();
+        }
+    }
+}
+
+bool QGIS_dev::onSaveProject()
+{
+    if (m_projectFilePath.isEmpty()) {
+        return onSaveProjectAs();
+    }
+    else {
+        // 设置项目路径，以便QGIS保存相对路径
+        QgsProject::instance()->setFileName(QFileInfo(m_projectFilePath).path());
+        if (QgsProject::instance()->write(m_projectFilePath)) {
+            m_isProjectDirty = false;
+            updateWindowTitle();
+            OutputManager::instance()->logMessage("项目已保存: " + m_projectFilePath);
+            return true;
+        }
+        else {
+            QMessageBox::critical(this, "错误", "项目保存失败！");
+            return false;
+        }
+    }
+}
+
+bool QGIS_dev::onSaveProjectAs()
+{
+    QString filePath = QFileDialog::getSaveFileName(this, "项目另存为", m_projectFilePath.isEmpty() ? QDir::homePath() : m_projectFilePath, "QGIS Projects (*.qgz)");
+    if (filePath.isEmpty()) return false;
+
+    // 如果没有.qgz后缀，则添加
+    if (!filePath.endsWith(".qgz", Qt::CaseInsensitive)) {
+        filePath += ".qgz";
+    }
+
+    m_projectFilePath = filePath;
+    return onSaveProject();
+}
+
+void QGIS_dev::onOpenLogFolder()
+{
+    // 获取可执行文件所在目录
+    QDir exeDir = QCoreApplication::applicationDirPath(); // 修改为 QDir 类型  
+    exeDir.cdUp();
+    exeDir.cdUp();
+    QString logDir = exeDir.filePath("logs");
+
+    QDir dir(logDir);
+    if (!dir.exists()) {
+        QMessageBox::warning(this, "提示", "日志文件夹不存在: " + logDir);
+        return;
+    }
+#if defined(Q_OS_WIN)
+    QProcess::startDetached("explorer.exe", { QDir::toNativeSeparators(logDir) });
+#elif defined(Q_OS_MAC)
+    QProcess::startDetached("open", { logDir });
+#else // Linux/Unix
+    QProcess::startDetached("xdg-open", { logDir });
+#endif
+}
+
+// --- 在此设置所有的工具栏 ---
+void QGIS_dev::setupToolBar() 
+{   
+    //--- 放大缩小工具---
+    m_zoomInAction = new QAction("放大", this);
+    m_zoomInAction->setStatusTip("放大");
+    m_zoomInAction->setIcon(QIcon("resource/images/放大.png"));
+    connect(m_zoomInAction, &QAction::triggered, m_mapCanvas, &MapCanvas::zoomIn);
+
+    m_zoomOutAction = new QAction("缩小", this);
+    m_zoomOutAction->setStatusTip("缩小");
+    m_zoomOutAction->setIcon(QIcon("resource/images/缩小.png"));
+    connect(m_zoomOutAction, &QAction::triggered, m_mapCanvas, &MapCanvas::zoomOut);
+
+    // --- 地图工具 ---
+    m_selectionTool = new FeatureSelectionTool(m_mapCanvas->getCanvas());
+
+    m_panAction = new QAction("平移", this);
+    m_panAction->setIcon(QIcon("resource/images/平移.png"));
+    m_panAction->setCheckable(true); // 工具按钮是状态性的，所以设为可选中
+    m_panAction->setStatusTip("平移地图");
+    connect(m_panAction, &QAction::triggered, this, &QGIS_dev::onActivatePanTool);
+
+    m_selectAction = new QAction("选择要素", this);
+    m_selectAction->setIcon(QIcon("resource/images/选择.png"));
+    m_selectAction->setCheckable(true);
+    m_selectAction->setStatusTip("点击以选择要素并查看信息");
+    connect(m_selectAction, &QAction::triggered, this, &QGIS_dev::onActivateSelectTool);
+
+    // 3. 使用 QActionGroup 确保同一时间只有一个工具被激活
+    m_toolActionGroup = new QActionGroup(this);
+    m_toolActionGroup->addAction(m_panAction);
+    m_toolActionGroup->addAction(m_selectAction);
+
+    m_toolBar->addAction(m_zoomInAction);
+    m_toolBar->addAction(m_zoomOutAction);
+    m_toolBar->addSeparator();
+    m_toolBar->addAction(m_panAction);
+    m_toolBar->addAction(m_selectAction);
+}
+
+// --- 新增：实现激活工具的槽函数 ---
+void QGIS_dev::onActivatePanTool()
+{
+    m_mapCanvas->getCanvas()->setMapTool(m_mapCanvas->getPanTool());
+}
+
+void QGIS_dev::onActivateSelectTool()
+{
+    m_mapCanvas->getCanvas()->setMapTool(m_selectionTool);
+}
+
+// QGIS_dev.cpp
+
+void QGIS_dev::onAddVectorLayer()
+{
+    // ... (前面的项目保存检查逻辑不变) ...
+    if (m_projectFilePath.isEmpty()) {
+        QMessageBox::information(this, "提示", "请先保存您的项目，然后才能添加图层。");
+        if (!onSaveProjectAs()) {
+            return;
+        }
+    }
+
+    QString filter = "Shapefile (*.shp);;GeoPackage (*.gpkg);;All files (*.*)";
+    QString sourceFilePath = QFileDialog::getOpenFileName(this, "选择一个矢量文件", QDir::homePath(), filter);
+
+    if (sourceFilePath.isEmpty()) return;
+
+    QString copiedFileRelativePath;
+    // 复制文件到项目文件夹
+    if (!copyLayerDataToProject(sourceFilePath, copiedFileRelativePath)) {
+        OutputManager::instance()->logError("复制图层数据失败！");
+        return;
+    }
+
+    // ================== 关键修改 ==================
+    // 1. 获取复制后文件的【绝对路径】
+    QDir projectDir(QFileInfo(m_projectFilePath).path());
+    QString copiedFileAbsolutePath = projectDir.absoluteFilePath(copiedFileRelativePath);
+
+    // 2. 使用【绝对路径】加载图层
+    QString layerName = QFileInfo(copiedFileAbsolutePath).baseName();
+    QgsVectorLayer* vectorLayer = new QgsVectorLayer(copiedFileAbsolutePath, layerName, "ogr");
+    // ===============================================
+
+    if (vectorLayer->isValid()) {
+        if (vectorLayer->isValid()) {
+            // +++ 恢复调用 +++
+            if (!resolveLayerCrs(vectorLayer)) {
+                delete vectorLayer;
+                return;
+            }
+
+            QgsProject::instance()->addMapLayer(vectorLayer);
+            updateProjectCrs();
+            //m_mapCanvas->zoomToLayer(vectorLayer);
+            m_mapCanvas->getCanvas()->zoomToFullExtent();
+            OutputManager::instance()->logMessage("成功加载矢量图层: " + copiedFileAbsolutePath);
+        }
+        else {
+            // ================== 关键修改 ==================
+            // 添加错误处理，这样才能看到失败的原因
+            QString errorMsg = "加载矢量图层失败: " + copiedFileAbsolutePath;
+            OutputManager::instance()->logError(errorMsg);
+            OutputManager::instance()->logError("错误详情: " + vectorLayer->error().message());
+            delete vectorLayer; // 释放内存
+            // ===============================================
+        }
+    }
+}
+
+void QGIS_dev::onAddRasterLayer()
+{
+    if (m_projectFilePath.isEmpty()) {
+        QMessageBox::information(this, "提示", "请先保存您的项目，然后才能添加图层。");
+        if (!onSaveProjectAs()) return;
+    }
+
+    QString filter = "GeoTIFF (*.tif *.tiff);;Erdas Imagine (*.img);;All files (*.*)";
+    QString sourceFilePath = QFileDialog::getOpenFileName(this, "选择一个栅格文件", QDir::homePath(), filter);
+
+    if (sourceFilePath.isEmpty()) return;
+
+    QString copiedFileRelativePath;
+    if (!copyLayerDataToProject(sourceFilePath, copiedFileRelativePath)) {
+        QString errorString = QFile().errorString(); // 获取静态方法的返回值
+        OutputManager::instance()->logError(
+            QString("复制文件失败: %1 -> %2, 错误: %3")
+            .arg(sourceFilePath)
+            .arg(copiedFileRelativePath)
+            .arg(errorString)
+        );
+        return;
+    }
+
+    // ================== 关键修改 ==================
+    // 1. 获取复制后文件的【绝对路径】
+    QDir projectDir(QFileInfo(m_projectFilePath).path());
+    QString copiedFileAbsolutePath = projectDir.absoluteFilePath(copiedFileRelativePath);
+
+    // 2. 使用【绝对路径】加载图层
+    QString layerName = QFileInfo(copiedFileAbsolutePath).baseName();
+    // 注意: QGIS 3.x 推荐用 "gdal" provider for rasters
+    QgsRasterLayer* rasterLayer = new QgsRasterLayer(copiedFileAbsolutePath, layerName, "gdal");
+    // ===============================================
+
+    if (rasterLayer->isValid()) {
+        // +++ 恢复调用 +++
+        if (!resolveLayerCrs(rasterLayer)) {
+            delete rasterLayer;
+            return;
+        }
+
+        QgsProject::instance()->addMapLayer(rasterLayer);
+        updateProjectCrs();
+        //m_mapCanvas->zoomToLayer(rasterLayer);
+        m_mapCanvas->getCanvas()->zoomToFullExtent();
+        OutputManager::instance()->logMessage("成功加载栅格图层: " + copiedFileAbsolutePath);
+    }
+    else {
+        // ================== 关键修改 ==================
+        // 添加错误处理
+        QString errorMsg = "加载栅格图层失败: " + copiedFileAbsolutePath;
+        OutputManager::instance()->logError(errorMsg);
+        OutputManager::instance()->logError("错误详情: " + rasterLayer->error().message());
+        delete rasterLayer;
+        // ===============================================
+    }
+}
+
+// ---- 辅助函数实现 ----
+
+void QGIS_dev::onProjectDirty() {
+    m_isProjectDirty = true;
+    updateWindowTitle();
+}
+
+void QGIS_dev::updateWindowTitle() {
+    QString title = m_projectFilePath.isEmpty() ? "未命名项目" : QFileInfo(m_projectFilePath).fileName();
+    if (m_isProjectDirty) {
+        title += "*";
+    }
+    title += " - My GIS App";
+    setWindowTitle(title);
+}
+
+// 检查并提示保存
+bool QGIS_dev::maybeSave() {
+    if (!m_isProjectDirty) return true;
+
+    const QMessageBox::StandardButton ret = QMessageBox::warning(this, "未保存的更改",
+        "当前项目有未保存的更改，您想保存吗？",
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
+
+    if (ret == QMessageBox::Save) {
+        return onSaveProject();
+    }
+    else if (ret == QMessageBox::Cancel) {
+        return false;
+    }
+    return true; // Discard
+}
+
+// 关闭事件
+void QGIS_dev::closeEvent(QCloseEvent* event) {
+    if (maybeSave()) {
+        event->accept();
+    }
+    else {
+        event->ignore();
+    }
+}
+
+// 重新构建图层树
+void QGIS_dev::rebuildLayerTreeFromProject() {
+    m_customLayerTreeView->clear();
+    // QgsProject::mapLayers() 返回的是一个 map，值是图层指针
+    // 我们需要按照图层树的顺序来添加
+    QgsLayerTree* layerTree = QgsProject::instance()->layerTreeRoot();
+    for (QgsLayerTreeNode* node : layerTree->children()) {
+        if (node->nodeType() == QgsLayerTreeNode::NodeLayer) {
+            QgsLayerTreeLayer* layerNode = static_cast<QgsLayerTreeLayer*>(node);
+            m_customLayerTreeView->addLayer(layerNode->layer());
+        }
+    }
+    // 确保画布也更新
+    m_customLayerTreeView->updateMapCanvasLayers();
+}
+
+// 复制数据文件到项目目录
+bool QGIS_dev::copyLayerDataToProject(const QString& sourceFilePath, QString& newRelativePath) {
+    QDir projectDir(QFileInfo(m_projectFilePath).path());
+    if (!projectDir.exists("data")) {
+        projectDir.mkdir("data");
+    }
+    QDir dataDir(projectDir.filePath("data"));
+
+    QString fileName = QFileInfo(sourceFilePath).fileName();
+    QString destFilePath = dataDir.filePath(fileName);
+
+    // 特殊处理 Shapefile
+    if (sourceFilePath.endsWith(".shp", Qt::CaseInsensitive)) {
+        if (!copyShapefile(sourceFilePath, dataDir.path(), fileName)) {
+            return false;
+        }
+    }
+    else { // 处理单个文件 (如.tif, .gpkg)
+        if (QFile::exists(destFilePath)) {
+            // 可选：询问用户是否覆盖
+        }
+        if (!QFile::copy(sourceFilePath, destFilePath)) {
+            return false;
+        }
+    }
+
+    newRelativePath = "data/" + fileName;
+    return true;
+}
+
+// 专门用来复制Shapefile及其所有组件的函数
+bool QGIS_dev::copyShapefile(const QString& sourceShpPath, const QString& destDir, QString& newFileName) {
+    QString baseName = QFileInfo(sourceShpPath).completeBaseName();
+    QDir sourceDir = QFileInfo(sourceShpPath).dir();
+
+    QStringList extensions = { ".shp", ".shx", ".dbf", ".prj", ".cpg", ".sbn", ".sbx" };
+    for (const QString& ext : extensions) {
+        QString sourceFile = sourceDir.filePath(baseName + ext);
+        if (QFile::exists(sourceFile)) {
+            QString destFile = QDir(destDir).filePath(QFileInfo(sourceFile).fileName());
+            if (QFile::exists(destFile)) QFile::remove(destFile); // 先删除以防万一
+            if (!QFile::copy(sourceFile, destFile)) {
+                OutputManager::instance()->logError("无法复制文件: " + sourceFile);
+                return false;
+            }
+        }
+    }
+    newFileName = QFileInfo(sourceShpPath).fileName();
+    return true;
+}
+
+void QGIS_dev::onCurrentLayerChanged(QgsMapLayer* layer)
+{
+    m_currentLayer = layer;
+    // 不再需要在这里更新任何状态栏的标签。
+    // 状态栏的更新应该由它们各自的事件驱动。
+    // 比如坐标由鼠标移动事件驱动，比例尺由画布缩放事件驱动，CRS由项目CRS改变事件驱动。
+}
+
+
+// 修正 updateCoordinates，去掉对 m_currentLayer 的依赖
+void QGIS_dev::updateCoordinates(const QgsPointXY& point)
+{
+    // 这个函数之前的版本已经是正确的了，我们保持它
+    try {
+        const QgsCoordinateReferenceSystem destCrs = m_mapCanvas->getCanvas()->mapSettings().destinationCrs();
+
+        if (!destCrs.isValid()) {
+            m_coordsLabel->setText("坐标: (未知坐标系)");
+            return;
+        }
+
+        m_coordsLabel->setText(QString::asprintf("坐标: %.4f, %.4f", point.x(), point.y()));
+    }
+    catch (const std::exception& e) {
+        // ... (异常处理不变) ...
+    }
+}
+
+
+// **核心修正：彻底解耦 updateScale 与 m_currentLayer**
+void QGIS_dev::updateScale(double scale)
+{
+    // **删除 if (!m_currentLayer) 的判断**
+
+    if (scale <= 0) {
+        m_scaleLabel->setText("比例尺: N/A");
+        return;
+    }
+
+    // 直接更新比例尺标签
+    m_scaleLabel->setText(QString("比例尺 1:%1").arg(static_cast<long>(scale)));
+}
+
+// +++ 新增槽函数的实现 +++
+// updateProjectCrs 函数实现修改 (使用 m_crsButton)
+void QGIS_dev::updateProjectCrs()
+{
+    // 这个函数的 try-catch 结构很好，保持它
+    try {
+        QgsCoordinateReferenceSystem crs = QgsProject::instance()->crs();
+
+        if (crs.isValid()) {
+            // 我们只显示简短的 authid，把详细描述放在 tooltip 里
+            m_crsButton->setText(crs.authid());
+            m_crsButton->setToolTip(QString("当前项目CRS: %1\n点击以更改...").arg(crs.description()));
+        }
+        else {
+            m_crsButton->setText("未知坐标系");
+            m_crsButton->setToolTip("当前项目未设置CRS\n点击以选择...");
+        }
+    }
+    catch (const std::exception& e) {
+        // ... (异常处理不变) ...
+    }
+}
+
+// +++ 实现新的槽函数 onChangeProjectCrs +++
+void QGIS_dev::onChangeProjectCrs()
+{
+    // ====================== 使用新API的核心修改 ======================
+
+    // 1. 创建 QgsProjectionSelectionDialog 实例
+    //    它继承自 QDialog，所以用法和旧的 QgsProjectionSelector 类似
+    QgsProjectionSelectionDialog dialog(this);
+    dialog.setWindowTitle("选择项目坐标参考系");
+
+    // 2. 设置对话框的初始CRS，为当前项目的CRS
+    dialog.setCrs(QgsProject::instance()->crs());
+
+    // 3. 执行对话框，并检查用户是否点击了 "OK"
+    if (dialog.exec() == QDialog::Accepted)
+    {
+        // 4. 从对话框中获取用户选择的CRS
+        QgsCoordinateReferenceSystem newCrs = dialog.crs();
+
+        if (newCrs.isValid()) {
+            // 直接设置项目的CRS，这会自动触发 crsChanged 信号，
+            // 进而调用 updateProjectCrs 来更新按钮文本。
+            QgsProject::instance()->setCrs(newCrs);
+        }
+    }
+    // =================================================================
+}
+
+// resolveLayerCrs 函数的最终实现
+// 最终专业版 resolveLayerCrs
+bool QGIS_dev::resolveLayerCrs(QgsMapLayer* layer)
+{
+    if (!layer) return false;
+
+    QgsCoordinateReferenceSystem layerCrs = layer->crs();
+
+    // Case 1: 图层完全没有CRS定义
+    if (!layerCrs.isValid()) {
+        QMessageBox msgBox(this);
+        msgBox.setIcon(QMessageBox::Warning);
+        msgBox.setWindowTitle("缺少坐标参考系");
+        msgBox.setText(QString("图层 '%1' 缺少坐标参考系(CRS)定义。").arg(layer->name()));
+        msgBox.setInformativeText("您必须为该图层指定一个CRS，否则无法正确加载。\n"
+            "如果您不确定，通常可以选择 'WGS 84' (EPSG:4326)。");
+
+        QPushButton* selectButton = msgBox.addButton("指定CRS...", QMessageBox::ActionRole);
+        msgBox.addButton("取消加载", QMessageBox::RejectRole);
+        msgBox.exec();
+
+        if (msgBox.clickedButton() == selectButton) {
+            QgsProjectionSelectionDialog dialog(this);
+            if (dialog.exec() == QDialog::Accepted) {
+                QgsCoordinateReferenceSystem newCrs = dialog.crs();
+                if (newCrs.isValid()) {
+                    layer->setCrs(newCrs); // 这是“定义/指定”操作
+                    OutputManager::instance()->logMessage(QString("用户为图层 '%1' 指定了CRS: %2").arg(layer->name()).arg(newCrs.description()));
+                    return true;
+                }
+            }
+        }
+
+        OutputManager::instance()->logWarning(QString("用户取消为图层 '%1' 指定CRS，加载中止。").arg(layer->name()));
+        return false;
+    }
+    // Case 2: 图层有CRS，但可能不规范 (如没有authid)
+    else if (layerCrs.authid().isEmpty()) {
+        OutputManager::instance()->logWarning(
+            QString("图层 '%1' 的CRS '%2' 缺少标准的EPSG代码，可能会影响部分功能，但仍将加载。")
+            .arg(layer->name()).arg(layerCrs.description())
+        );
+        // 我们选择接受它，并让QGIS尝试动态投影
+        return true;
+    }
+
+    // Case 3: 图层有一个合格的、带authid的CRS。一切正常。
+    return true;
+}
+
+void QGIS_dev::onAddDelimitedTextLayer()
+{
+    QString filePath = QFileDialog::getOpenFileName(this,
+        "选择一个分隔符文本文件",
+        QDir::homePath(),
+        "CSV (逗号分隔) (*.csv);;文本文件 (*.txt);;所有文件 (*.*)");
+
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    // ====================== 核心加固 ======================
+
+    // 1. 确保文件路径使用正斜杠
+    QString forwardSlashPath = filePath;
+    forwardSlashPath.replace('\\', '/');
+
+    // 2. 使用 QUrl 来安全地构造URI，它会自动处理特殊字符和协议前缀
+    QUrl fileUrl = QUrl::fromLocalFile(forwardSlashPath);
+
+    // 3. 构建参数部分
+    QUrlQuery query;
+    query.addQueryItem("encoding", "UTF-8");
+    query.addQueryItem("delimiter", ",");
+    query.addQueryItem("xField", "lon");
+    query.addQueryItem("yField", "lat");
+    query.addQueryItem("crs", "epsg:4326");
+    query.addQueryItem("spatialIndex", "yes");
+    query.addQueryItem("subsetIndex", "no");
+    query.addQueryItem("watchFile", "no");
+
+    // 4. 将参数附加到URL上
+    fileUrl.setQuery(query);
+
+    // 5. 从 QUrl 获取最终的、格式正确的URI字符串
+    QString uri = fileUrl.toString();
+
+    OutputManager::instance()->logMessage("构造的URI: " + uri); // 打印URI到日志，方便调试
+    // =======================================================
+
+    QString layerName = QFileInfo(filePath).baseName();
+    QgsVectorLayer* layer = new QgsVectorLayer(uri, layerName, "delimitedtext");
+
+    if (!layer || !layer->isValid()) {
+        // ... (错误信息对话框不变) ...
+        // +++ 增加更详细的错误日志 +++
+        OutputManager::instance()->logError("加载分隔符文本图层失败。");
+        OutputManager::instance()->logError("Provider 错误: " + layer->error().message());
+        delete layer;
+        return;
+    }
+
+    QgsProject::instance()->addMapLayer(layer);
+    m_mapCanvas->getCanvas()->zoomToFullExtent();
+    OutputManager::instance()->logMessage("成功加载分隔符文本图层: " + filePath);
+}
+正在处理文件: CustomLayerTreeView.h
+(CustomLayerTreeView.h)
+#include <QWidget>
+#include <QPoint>
+
+// 前向声明
+class QTreeView;
+class QStandardItemModel;
+class QStandardItem;
+class QgsMapLayer;
+class QgsMapCanvas;
+class QModelIndex;
+class QItemSelection;
+
+class CustomLayerTreeView : public QWidget
+{
+    Q_OBJECT
+
+public:
+    explicit CustomLayerTreeView(QgsMapCanvas* canvas, QWidget* parent = nullptr);
+    ~CustomLayerTreeView();
+    void updateMapCanvasLayers();
+
+signals:
+    void modelChanged(); // 新增信号
+    // +++ 新增信号，当选中项改变时发出 +++
+    void currentLayerChanged(QgsMapLayer* layer);
+
+public slots:
+    void addLayer(QgsMapLayer* layer);
+    void clear();
+
+    // +++ 新增槽函数，响应QTreeView自身的选中事件 +++
+    void onSelectionChanged(const QItemSelection& selected, const QItemSelection& deselected);
+
+private slots:
+    void onItemChanged(QStandardItem* item);
+    void onCustomContextMenuRequested(const QPoint& pos);
+    void onChangeLayerColor(QgsMapLayer* layer);
+
+    // -- !! 新增的私有槽函数，用于处理排序 !! --
+    void onMoveLayerUp(const QModelIndex& index);
+    void onMoveLayerDown(const QModelIndex& index);
+
+
+private:
+    void updateLayerItemIcon(QStandardItem* item, const QColor& color);
+    void onRemoveLayer(const QModelIndex& index);
+
+private:
+    QTreeView* m_treeView;
+    QStandardItemModel* m_model;
+    QgsMapCanvas* m_mapCanvas;
+};
+
+
+正在处理文件: FeatureSelectionTool.h
+(FeatureSelectionTool.h)
+#include <qgsmaptoolidentify.h> // 使用这个基类，它为识别要素提供了便利
+#include <qgsmapcanvas.h> // 确保包含QgsMapCanvas相关定义
+#include <qgsmapmouseevent.h> // 确保包含QgsMapCanvasMouseEvent相关定义
+
+class QgsMapCanvas;
+class QgsVectorLayer;
+class QgsFeature;
+
+class FeatureSelectionTool : public QgsMapToolIdentify
+{
+    Q_OBJECT
+
+public:
+    explicit FeatureSelectionTool(QgsMapCanvas* canvas);
+
+    // 重写父类的鼠标事件处理函数
+    void canvasMoveEvent(QgsMapMouseEvent* e) override; // 主要逻辑在这里
+    void canvasReleaseEvent(QgsMapMouseEvent* e) override;
+
+    // 当工具被激活或停用时调用
+    void activate() override;
+    void deactivate() override;
+
+private:
+    void clearCurrentSelection();
+
+    // 记录当前高亮的要素，避免重复操作
+    QgsVectorLayer* m_lastSelectedLayer = nullptr;
+    QgsFeatureId m_lastSelectedFeatureId;
+};
+
+正在处理文件: FileLogger.h
+(FileLogger.h)
+#pragma once
+#include <QObject>
+#include <QFile>
+#include <QTextStream>
+
+class FileLogger : public QObject
+{
+    Q_OBJECT
+
+public:
+    // 构造函数接收日志文件的完整路径
+    explicit FileLogger(const QString& logFilePath, QObject* parent = nullptr);
+    ~FileLogger();
+
+public slots:
+    // 这个槽将连接到 OutputManager::messageLogged 信号
+    void onMessageLogged(const QString& message, const QString& type);
+
+private:
+    QFile m_logFile;
+    QTextStream m_logStream;
+};
+正在处理文件: MapCanvas.h
+(MapCanvas.h)
+#include <QWidget>
+
+class QgsMapCanvas;
+class QgsMapLayer;
+class QgsMapToolPan;
+class FeatureSelectionTool; // <-- 新增
+class QToolBar;             // <-- 新增
+class QActionGroup;         // <-- 新增
+
+class MapCanvas : public QWidget
+{
+    Q_OBJECT // << 必须添加，因为我们使用了信号和槽
+
+public:
+    MapCanvas(QWidget* parent = nullptr);
+    ~MapCanvas();
+
+    QgsMapCanvas* getCanvas() const;
+    QgsMapToolPan* getPanTool() const; // 获取平移工具
+    void zoomToLayer(QgsMapLayer* layer);
+
+public slots:
+    // --- 新增的公共槽函数 ---
+    void zoomIn();  // 放大
+    void zoomOut(); // 缩小
+
+signals:
+    // 当比例尺变化时，发出此信号，携带格式化好的字符串
+    void scaleChanged(const QString& scaleText);
+
+private slots:
+    // --- 新增的私有槽函数 ---
+    // 用于接收来自 QgsMapCanvas 内部的 scaleChanged 信号
+    void onCanvasScaleChanged(double newScale);
+
+private:
+    QgsMapCanvas* m_qgsCanvas;
+    QgsMapToolPan* m_panTool;
+};
+
+正在处理文件: OutputWidget.h
+(OutputWidget.h)
+#pragma once
+#include <QWidget>
+
+// 前向声明
+class QTextEdit;
+
+class OutputWidget : public QWidget
+{
+	Q_OBJECT
+
+public:
+	OutputWidget(QWidget* parent = nullptr);
+	~OutputWidget();
+
+	void displayMessage(const QString& message,const QString& type);
+
+private:
+	QTextEdit* m_outputConsole;
+};
+正在处理文件: Output_Manager.h
+(Output_Manager.h)
+#pragma once
+#include <QObject>
+
+class OutputManager : public QObject 
+{
+	Q_OBJECT
+
+private:
+	// 私有构造函数，防止外部创建实例
+	explicit OutputManager(QObject* parent = nullptr);
+
+	// 静态私有成员，拥有唯一实例
+	static OutputManager* m_instance;
+
+public:
+	// 公共静态方法，用于记录并发送内容
+	static OutputManager* instance();
+
+public slots:
+	// 公共槽函数，用于记录发送内容
+	void logMessage(const QString& message);
+	void logWarning(const QString& message);
+	void logError(const QString& message);
+
+signals:
+	// 信号，当有新消息时发送
+	void messageLogged(const QString& message, const QString& type = "INFO"); // 信号类型，可以是INFO，WARNING，ERROR
+
+};
+正在处理文件: QGIS_dev.h
+(QGIS_dev.h)
+#include <QMainWindow>
+#include <QMenu>
+#include <QAction>
+#include <QDockWidget>
+#include <QToolBar>
+
+
+class MapCanvas;
+class CustomLayerTreeView;
+class OutputWidget;
+class QgsMapTool;
+class FeatureSelectionTool; // 我们自定义的选择工具
+class QActionGroup;       // 用于确保工具按钮的互斥性
+class QLabel;
+class QgsPointXY;
+class QgsMapLayer;
+class QgsCoordinateReferenceSystem;
+class QPushButton;
+
+class QGIS_dev : public QMainWindow
+{
+    Q_OBJECT
+
+public:
+    QGIS_dev(QWidget *parent = nullptr);
+    ~QGIS_dev();
+
+protected:
+    // 添加关闭事件处理，用于检查未保存的更改
+    void closeEvent(QCloseEvent* event) override;
+
+private slots:
+    // 文件操作
+    void onNewProject();
+    void onOpenProject();
+    bool onSaveProject();
+    bool onSaveProjectAs();
+
+    // 查看操作
+    void onOpenLogFolder();
+
+    // 内部槽函数，用于标记项目为已修改
+    void onProjectDirty();
+
+    // -- 将要实现的槽函数 --
+    void onAddVectorLayer();
+    void onAddRasterLayer();
+
+    // --- 地图工具激活槽函数 ---
+    void onActivatePanTool();
+    void onActivateSelectTool();
+
+    // +++ 新增的槽函数，用于更新状态栏 +++
+    void updateCoordinates(const QgsPointXY& point);
+    void updateScale(double scale);
+
+    // 选择图层发生变化时接收信号
+    void onCurrentLayerChanged(QgsMapLayer* layer);
+
+    // +++ 新增槽函数 +++
+    void updateProjectCrs(); // 用于更新状态栏的CRS显示
+
+    // +++ 新增槽函数，用于响应CRS按钮的点击 +++
+    void onChangeProjectCrs();
+
+    // +++ 新增槽函数 +++
+    void onAddDelimitedTextLayer();
+
+private:
+    // 初始化函数
+    void setupUI();
+    void setupActions();
+    void setupToolBar();
+
+    // 构件工程的辅助函数
+    void updateWindowTitle();
+    void rebuildLayerTreeFromProject(); // 从QgsProject重建图层树
+    bool maybeSave(); // 检查是否需要保存，并执行保存逻辑
+    bool copyLayerDataToProject(const QString& sourceFilePath, QString& newRelativePath); // 复制数据文件
+    bool copyShapefile(const QString& sourceShpPath, const QString& destDir, QString& newFileName); // 专门处理Shapefile
+
+    // UI 组件
+    MapCanvas* m_mapCanvas;
+    CustomLayerTreeView* m_customLayerTreeView;
+    OutputWidget* m_outputWidget;
+
+    // ... Dock 窗口 ...
+    QDockWidget* m_layerTreeDock;
+    QDockWidget* m_outputDock; // 我们保留输出Dock
+
+    // +++ 新增空间分析工具的Dock和占位符Widget +++
+    QDockWidget* m_analysisDock;
+    QWidget* m_analysisToolsWidget;
+
+
+    // 菜单和菜单动作
+    QMenu* m_fileMenu;
+    QAction* m_addVectorAction;
+    QAction* m_addRasterAction;
+    // +++ 新增菜单动作 +++
+    QAction* m_addDelimitedTextLayerAction;
+    QAction* m_newAction;
+    QAction* m_openAction;
+    QAction* m_saveAction;
+    QAction* m_saveAsAction;
+
+    QMenu* m_checkMenu;
+    QAction* m_checkLogsAction;
+
+    // --- 工具栏和工具动作 ---
+    QToolBar* m_toolBar;
+    QAction* m_zoomInAction;
+    QAction* m_zoomOutAction;
+    QAction* m_panAction;           // 平移动作
+    QAction* m_selectAction;        // 选择要素动作
+    QActionGroup* m_toolActionGroup; // 工具动作组
+
+    // --- 地图工具实例 ---
+    FeatureSelectionTool* m_selectionTool;
+
+    // --- 项目状态 ---
+    QString m_projectFilePath;
+    bool m_isProjectDirty;
+
+    // +++ 新增的成员变量，用于状态栏显示 +++
+    QLabel* m_coordsLabel;
+    QLabel* m_scaleLabel;
+
+    // +++ 将 m_crsLabel 的类型从 QLabel* 修改为 QPushButton* +++
+    bool resolveLayerCrs(QgsMapLayer* layer);
+    QPushButton* m_crsButton;
+    QgsMapLayer* m_currentLayer;
+};
+

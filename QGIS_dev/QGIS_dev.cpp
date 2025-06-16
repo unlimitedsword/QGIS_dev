@@ -15,17 +15,25 @@
 #include <QFileDialog> // 用于文件对话框
 #include <QDir>        // 用于获取默认路径
 #include <QMessageBox>
+#include <QLabel>
+#include <QStatusBar>
+#include <QPushButton> // 添加此行以包含 QPushButton 的完整定义
+#include <QProcess>
+#include <QUrl>
+#include <QUrlQuery>
 #include <qgsvectorlayer.h>
 #include <qgsrasterlayer.h> // 需要包含栅格图层头文件
 #include <qgslayertree.h>
 #include <qgsproject.h>
 #include <qgsmaptoolpan.h>
-
+#include <qgsMapLayer.h>
+#include <qgsapplication.h> // 添加此行以包含 QgsApplication 的完整定义
+#include <qgsprojectionselectiondialog.h>
 
 
 
 QGIS_dev::QGIS_dev(QWidget *parent)
-    : QMainWindow(parent), m_isProjectDirty(false) // 初始化项目状态
+    : QMainWindow(parent), m_isProjectDirty(false),m_currentLayer(nullptr) // 初始化项目状态
 {
     // 调用辅助函数来创建和设置UI
     setupUI();
@@ -45,15 +53,38 @@ QGIS_dev::QGIS_dev(QWidget *parent)
     connect(QgsProject::instance(), &QgsProject::layersAdded, this, &QGIS_dev::onProjectDirty);
     connect(QgsProject::instance(), &QgsProject::layersAdded, this, [this](const QList<QgsMapLayer*>& layers) {
         for (QgsMapLayer* layer : layers) {
+            // 在rebuildLayerTreeFromProject中已经有这个逻辑了，
+            // layersAdded 信号应该只用来触发UI更新，而不是直接添加
             m_customLayerTreeView->addLayer(layer);
         }
-        // 标记为脏状态的连接已经有了，这里专门处理UI更新
+        // 关键修改：添加图层后，手动更新一次画布，确保显示
+        m_customLayerTreeView->updateMapCanvasLayers();
         });
     connect(QgsProject::instance(), QOverload<const QStringList&>::of(&QgsProject::layersWillBeRemoved), this, [this]() {
         this->onProjectDirty();
         });
 
+    // 关键：连接地图画布的信号到新槽函数
+    QgsMapCanvas* canvas = m_mapCanvas->getCanvas();
+    connect(m_mapCanvas->getCanvas(), &QgsMapCanvas::scaleChanged, this, &QGIS_dev::updateScale);
+    connect(canvas, &QgsMapCanvas::xyCoordinates, this, &QGIS_dev::updateCoordinates);
+    connect(canvas, &QgsMapCanvas::scaleChanged, this, &QGIS_dev::updateScale);
+
+    // +++ 将图层树的选中事件连接到主窗口的槽 +++
+    connect(m_customLayerTreeView, &CustomLayerTreeView::currentLayerChanged,
+        this, &QGIS_dev::onCurrentLayerChanged);
+
+    // ====================== 核心修改 ======================
+    // 1. 连接 QgsProject 的 crsChanged 信号到我们的新槽函数
+    connect(QgsProject::instance(), &QgsProject::crsChanged, this, &QGIS_dev::updateProjectCrs);
+
+    // 2. 在程序启动时，手动调用一次，以显示初始的CRS状态
+    updateProjectCrs();
+    // ========================================================
+
     updateWindowTitle();
+
+    updateScale(m_mapCanvas->getCanvas()->scale());
 }
 
 QGIS_dev::~QGIS_dev()
@@ -78,19 +109,73 @@ void QGIS_dev::setupUI()
     m_layerTreeDock->setWidget(m_customLayerTreeView);
     addDockWidget(Qt::LeftDockWidgetArea, m_layerTreeDock);
 
-    // 创建并配置输出窗口DockWidget
+    // ====================== 核心修改：创建两个右侧Dock ======================
+    // a. 创建“空间分析”Dock
+    m_analysisToolsWidget = new QWidget(this); // (占位符 Widget)
+    QVBoxLayout* analysisLayout = new QVBoxLayout(m_analysisToolsWidget);
+    analysisLayout->addWidget(new QLabel("空间分析工具将在此处...", m_analysisToolsWidget));
+    analysisLayout->addStretch();
+    m_analysisToolsWidget->setLayout(analysisLayout);
+
+    m_analysisDock = new QDockWidget("空间分析", this);
+    m_analysisDock->setWidget(m_analysisToolsWidget);
+
+    // b. 创建“输出”Dock
     m_outputDock = new QDockWidget("输出", this);
     m_outputDock->setWidget(m_outputWidget);
-    addDockWidget(Qt::BottomDockWidgetArea, m_outputDock);
+
+    // c. 先添加上面的（分析），再添加下面的（输出）
+    addDockWidget(Qt::RightDockWidgetArea, m_analysisDock);
+    addDockWidget(Qt::RightDockWidgetArea, m_outputDock);
+
+    // d. 将它们垂直排列
+    //    如果它们默认是tab页，就用 splitDockWidget 强制拆分
+    //    通常后一个add会放在前一个的下面，但如果不是，就用split
+    splitDockWidget(m_analysisDock, m_outputDock, Qt::Vertical);
+
+    // 在 setupUI 函数的最后
+    m_analysisDock->setMinimumWidth(350);
+    m_outputDock->setMinimumWidth(350);
+
+    // =======================================================================
     
     // 创建菜单栏
     m_fileMenu = menuBar()->addMenu("文件(&F)"); // &F 设置快捷键 Alt+F
+    m_checkMenu = menuBar()->addMenu("查看(&C)");
 
     // 创建工具栏
     m_toolBar = new QToolBar(this);
     addToolBar(Qt::TopToolBarArea, m_toolBar);
     m_toolBar->setFloatable(false);       // 设置是否浮动
     m_toolBar->setMovable(false);         // 设置工具栏不允许移动
+
+    // 新增：设置状态栏 
+    QStatusBar* sb = statusBar(); // 获取主窗口的状态栏
+
+    // 创建坐标标签
+    m_coordsLabel = new QLabel("坐标: (移动鼠标查看)", this);
+    m_coordsLabel->setMinimumWidth(250); // 设置一个最小宽度，防止跳动
+    m_coordsLabel->setFrameShape(QFrame::StyledPanel); // 可选：添加边框使其更像QGIS
+    m_coordsLabel->setFrameShadow(QFrame::Sunken);
+
+    // 创建比例尺标签
+    m_scaleLabel = new QLabel("比例尺: N/A", this);
+    m_scaleLabel->setMinimumWidth(150);
+    m_scaleLabel->setFrameShape(QFrame::StyledPanel);
+    m_scaleLabel->setFrameShadow(QFrame::Sunken);
+
+    // 将标签作为永久部件添加到状态栏（这样它们就不会被临时消息覆盖）
+    sb->addPermanentWidget(m_coordsLabel);
+    sb->addPermanentWidget(m_scaleLabel);
+
+    // ====================== 核心修改：创建 QPushButton ======================
+    m_crsButton = new QPushButton("未知坐标系", this);
+    m_crsButton->setToolTip("点击以更改项目的坐标参考系(CRS)");
+    m_crsButton->setFlat(true); // 让它看起来像个标签，但可以点击
+    m_crsButton->setCursor(Qt::PointingHandCursor); // 鼠标悬停时显示手形
+    connect(m_crsButton, &QPushButton::clicked, this, &QGIS_dev::onChangeProjectCrs);
+
+    sb->addPermanentWidget(m_crsButton);
 }
 
 // ---在此设置所有的菜单栏---
@@ -105,6 +190,13 @@ void QGIS_dev::setupActions()
     m_addRasterAction = new QAction("添加栅格图层", this);
     m_addRasterAction->setStatusTip("从文件加载一个栅格图层 (如: .tif)");
     connect(m_addRasterAction, &QAction::triggered, this, &QGIS_dev::onAddRasterLayer);
+
+    // ====================== 新增动作 ======================
+   // 创建“添加分隔符文本图层”动作
+    m_addDelimitedTextLayerAction = new QAction("添加分隔符文本图层...", this);
+    m_addDelimitedTextLayerAction->setStatusTip("从CSV或其他文本文件加载点图层");
+    connect(m_addDelimitedTextLayerAction, &QAction::triggered, this, &QGIS_dev::onAddDelimitedTextLayer);
+    // ======================================================
 
     // 新建项目动作
     m_newAction = new QAction("新建项目", this);
@@ -134,37 +226,58 @@ void QGIS_dev::setupActions()
     m_fileMenu->addSeparator();
     m_fileMenu->addAction(m_addVectorAction);
     m_fileMenu->addAction(m_addRasterAction);
+    m_fileMenu->addAction(m_addDelimitedTextLayerAction);
+
+    m_checkLogsAction = new QAction("日志", this);
+    connect(m_checkLogsAction, &QAction::triggered, this, &QGIS_dev::onOpenLogFolder);
+    m_checkMenu->addAction(m_checkLogsAction); // 假设你想加到“查看”菜单
+
 }
 
 // ---- 新的项目管理槽函数 ----
 
+// **修改 onNewProject 函数**
+// QgsProject::clear() 也会发出 crsChanged 信号，所以也无需手动调用
 void QGIS_dev::onNewProject()
 {
     if (maybeSave()) {
         QgsProject::instance()->clear();
-        m_customLayerTreeView->clear(); // 需要在 CustomLayerTreeView 中实现 clear()
+
+        QgsCoordinateReferenceSystem defaultCrs("EPSG:4326");
+        if (defaultCrs.isValid()) {
+            QgsProject::instance()->setCrs(defaultCrs);
+        }
+
+        // 强制处理事件队列，确保UI更新
+        QApplication::processEvents();
+
+        m_customLayerTreeView->clear();
         m_projectFilePath.clear();
         m_isProjectDirty = false;
         updateWindowTitle();
-        OutputManager::instance()->logMessage("新项目已创建。");
+        OutputManager::instance()->logMessage("新项目已创建，默认CRS为WGS 84。");
     }
 }
 
+// **修改 onOpenProject 函数**
+// 在成功读取项目后，我们不需要手动调用 updateProjectCrs，因为 QgsProject::read() 
+// 会自动设置新的CRS，并发出 crsChanged 信号，从而自动触发我们的槽函数。
 void QGIS_dev::onOpenProject()
 {
     if (maybeSave()) {
         QString filePath = QFileDialog::getOpenFileName(this, "打开QGIS项目", QDir::homePath(), "QGIS Projects (*.qgz *.qgs)");
         if (filePath.isEmpty()) return;
 
-        QgsProject::instance()->clear(); // 清除旧项目
+        QgsProject::instance()->clear();
         m_customLayerTreeView->clear();
 
         if (QgsProject::instance()->read(filePath)) {
             m_projectFilePath = filePath;
-            rebuildLayerTreeFromProject(); // 核心：从项目重建UI
+            rebuildLayerTreeFromProject();
             m_isProjectDirty = false;
             updateWindowTitle();
             OutputManager::instance()->logMessage("项目已打开: " + filePath);
+            // **注意**: 这里不需要手动调用 updateProjectCrs()
         }
         else {
             QMessageBox::critical(this, "错误", "无法读取项目文件: " + filePath);
@@ -207,6 +320,28 @@ bool QGIS_dev::onSaveProjectAs()
 
     m_projectFilePath = filePath;
     return onSaveProject();
+}
+
+void QGIS_dev::onOpenLogFolder()
+{
+    // 获取可执行文件所在目录
+    QDir exeDir = QCoreApplication::applicationDirPath(); // 修改为 QDir 类型  
+    exeDir.cdUp();
+    exeDir.cdUp();
+    QString logDir = exeDir.filePath("logs");
+
+    QDir dir(logDir);
+    if (!dir.exists()) {
+        QMessageBox::warning(this, "提示", "日志文件夹不存在: " + logDir);
+        return;
+    }
+#if defined(Q_OS_WIN)
+    QProcess::startDetached("explorer.exe", { QDir::toNativeSeparators(logDir) });
+#elif defined(Q_OS_MAC)
+    QProcess::startDetached("open", { logDir });
+#else // Linux/Unix
+    QProcess::startDetached("xdg-open", { logDir });
+#endif
 }
 
 // --- 在此设置所有的工具栏 ---
@@ -296,21 +431,28 @@ void QGIS_dev::onAddVectorLayer()
     // ===============================================
 
     if (vectorLayer->isValid()) {
-        OutputManager::instance()->logMessage("成功加载矢量图层: " + copiedFileAbsolutePath);
-        QgsProject::instance()->addMapLayer(vectorLayer);
-        // 您需要连接 QgsProject::layersAdded 信号来更新图层树，
-        // 而不是在这里手动调用 m_customLayerTreeView->addLayer
-        m_mapCanvas->zoomToLayer(vectorLayer);
-        // onProjectDirty(); // 连接了 layersAdded 信号，这句可以省略，但保留也无害
-    }
-    else {
-        // ================== 关键修改 ==================
-        // 添加错误处理，这样才能看到失败的原因
-        QString errorMsg = "加载矢量图层失败: " + copiedFileAbsolutePath;
-        OutputManager::instance()->logError(errorMsg);
-        OutputManager::instance()->logError("错误详情: " + vectorLayer->error().message());
-        delete vectorLayer; // 释放内存
-        // ===============================================
+        if (vectorLayer->isValid()) {
+            // +++ 恢复调用 +++
+            if (!resolveLayerCrs(vectorLayer)) {
+                delete vectorLayer;
+                return;
+            }
+
+            QgsProject::instance()->addMapLayer(vectorLayer);
+            updateProjectCrs();
+            //m_mapCanvas->zoomToLayer(vectorLayer);
+            m_mapCanvas->getCanvas()->zoomToFullExtent();
+            OutputManager::instance()->logMessage("成功加载矢量图层: " + copiedFileAbsolutePath);
+        }
+        else {
+            // ================== 关键修改 ==================
+            // 添加错误处理，这样才能看到失败的原因
+            QString errorMsg = "加载矢量图层失败: " + copiedFileAbsolutePath;
+            OutputManager::instance()->logError(errorMsg);
+            OutputManager::instance()->logError("错误详情: " + vectorLayer->error().message());
+            delete vectorLayer; // 释放内存
+            // ===============================================
+        }
     }
 }
 
@@ -328,7 +470,13 @@ void QGIS_dev::onAddRasterLayer()
 
     QString copiedFileRelativePath;
     if (!copyLayerDataToProject(sourceFilePath, copiedFileRelativePath)) {
-        OutputManager::instance()->logError("复制栅格数据失败！");
+        QString errorString = QFile().errorString(); // 获取静态方法的返回值
+        OutputManager::instance()->logError(
+            QString("复制文件失败: %1 -> %2, 错误: %3")
+            .arg(sourceFilePath)
+            .arg(copiedFileRelativePath)
+            .arg(errorString)
+        );
         return;
     }
 
@@ -344,10 +492,17 @@ void QGIS_dev::onAddRasterLayer()
     // ===============================================
 
     if (rasterLayer->isValid()) {
-        OutputManager::instance()->logMessage("成功加载栅格图层: " + copiedFileAbsolutePath);
+        // +++ 恢复调用 +++
+        if (!resolveLayerCrs(rasterLayer)) {
+            delete rasterLayer;
+            return;
+        }
+
         QgsProject::instance()->addMapLayer(rasterLayer);
-        m_mapCanvas->zoomToLayer(rasterLayer);
-        // onProjectDirty(); // 同上，可省略
+        updateProjectCrs();
+        //m_mapCanvas->zoomToLayer(rasterLayer);
+        m_mapCanvas->getCanvas()->zoomToFullExtent();
+        OutputManager::instance()->logMessage("成功加载栅格图层: " + copiedFileAbsolutePath);
     }
     else {
         // ================== 关键修改 ==================
@@ -468,4 +623,205 @@ bool QGIS_dev::copyShapefile(const QString& sourceShpPath, const QString& destDi
     }
     newFileName = QFileInfo(sourceShpPath).fileName();
     return true;
+}
+
+void QGIS_dev::onCurrentLayerChanged(QgsMapLayer* layer)
+{
+    m_currentLayer = layer;
+    // 不再需要在这里更新任何状态栏的标签。
+    // 状态栏的更新应该由它们各自的事件驱动。
+    // 比如坐标由鼠标移动事件驱动，比例尺由画布缩放事件驱动，CRS由项目CRS改变事件驱动。
+}
+
+
+// 修正 updateCoordinates，去掉对 m_currentLayer 的依赖
+void QGIS_dev::updateCoordinates(const QgsPointXY& point)
+{
+    // 这个函数之前的版本已经是正确的了，我们保持它
+    try {
+        const QgsCoordinateReferenceSystem destCrs = m_mapCanvas->getCanvas()->mapSettings().destinationCrs();
+
+        if (!destCrs.isValid()) {
+            m_coordsLabel->setText("坐标: (未知坐标系)");
+            return;
+        }
+
+        m_coordsLabel->setText(QString::asprintf("坐标: %.4f, %.4f", point.x(), point.y()));
+    }
+    catch (const std::exception& e) {
+        // ... (异常处理不变) ...
+    }
+}
+
+
+// **核心修正：彻底解耦 updateScale 与 m_currentLayer**
+void QGIS_dev::updateScale(double scale)
+{
+    // **删除 if (!m_currentLayer) 的判断**
+
+    if (scale <= 0) {
+        m_scaleLabel->setText("比例尺: N/A");
+        return;
+    }
+
+    // 直接更新比例尺标签
+    m_scaleLabel->setText(QString("比例尺 1:%1").arg(static_cast<long>(scale)));
+}
+
+// +++ 新增槽函数的实现 +++
+// updateProjectCrs 函数实现修改 (使用 m_crsButton)
+void QGIS_dev::updateProjectCrs()
+{
+    // 这个函数的 try-catch 结构很好，保持它
+    try {
+        QgsCoordinateReferenceSystem crs = QgsProject::instance()->crs();
+
+        if (crs.isValid()) {
+            // 我们只显示简短的 authid，把详细描述放在 tooltip 里
+            m_crsButton->setText(crs.authid());
+            m_crsButton->setToolTip(QString("当前项目CRS: %1\n点击以更改...").arg(crs.description()));
+        }
+        else {
+            m_crsButton->setText("未知坐标系");
+            m_crsButton->setToolTip("当前项目未设置CRS\n点击以选择...");
+        }
+    }
+    catch (const std::exception& e) {
+        // ... (异常处理不变) ...
+    }
+}
+
+// +++ 实现新的槽函数 onChangeProjectCrs +++
+void QGIS_dev::onChangeProjectCrs()
+{
+    // ====================== 使用新API的核心修改 ======================
+
+    // 1. 创建 QgsProjectionSelectionDialog 实例
+    //    它继承自 QDialog，所以用法和旧的 QgsProjectionSelector 类似
+    QgsProjectionSelectionDialog dialog(this);
+    dialog.setWindowTitle("选择项目坐标参考系");
+
+    // 2. 设置对话框的初始CRS，为当前项目的CRS
+    dialog.setCrs(QgsProject::instance()->crs());
+
+    // 3. 执行对话框，并检查用户是否点击了 "OK"
+    if (dialog.exec() == QDialog::Accepted)
+    {
+        // 4. 从对话框中获取用户选择的CRS
+        QgsCoordinateReferenceSystem newCrs = dialog.crs();
+
+        if (newCrs.isValid()) {
+            // 直接设置项目的CRS，这会自动触发 crsChanged 信号，
+            // 进而调用 updateProjectCrs 来更新按钮文本。
+            QgsProject::instance()->setCrs(newCrs);
+        }
+    }
+    // =================================================================
+}
+
+// resolveLayerCrs 函数的最终实现
+// 最终专业版 resolveLayerCrs
+bool QGIS_dev::resolveLayerCrs(QgsMapLayer* layer)
+{
+    if (!layer) return false;
+
+    QgsCoordinateReferenceSystem layerCrs = layer->crs();
+
+    // Case 1: 图层完全没有CRS定义
+    if (!layerCrs.isValid()) {
+        QMessageBox msgBox(this);
+        msgBox.setIcon(QMessageBox::Warning);
+        msgBox.setWindowTitle("缺少坐标参考系");
+        msgBox.setText(QString("图层 '%1' 缺少坐标参考系(CRS)定义。").arg(layer->name()));
+        msgBox.setInformativeText("您必须为该图层指定一个CRS，否则无法正确加载。\n"
+            "如果您不确定，通常可以选择 'WGS 84' (EPSG:4326)。");
+
+        QPushButton* selectButton = msgBox.addButton("指定CRS...", QMessageBox::ActionRole);
+        msgBox.addButton("取消加载", QMessageBox::RejectRole);
+        msgBox.exec();
+
+        if (msgBox.clickedButton() == selectButton) {
+            QgsProjectionSelectionDialog dialog(this);
+            if (dialog.exec() == QDialog::Accepted) {
+                QgsCoordinateReferenceSystem newCrs = dialog.crs();
+                if (newCrs.isValid()) {
+                    layer->setCrs(newCrs); // 这是“定义/指定”操作
+                    OutputManager::instance()->logMessage(QString("用户为图层 '%1' 指定了CRS: %2").arg(layer->name()).arg(newCrs.description()));
+                    return true;
+                }
+            }
+        }
+
+        OutputManager::instance()->logWarning(QString("用户取消为图层 '%1' 指定CRS，加载中止。").arg(layer->name()));
+        return false;
+    }
+    // Case 2: 图层有CRS，但可能不规范 (如没有authid)
+    else if (layerCrs.authid().isEmpty()) {
+        OutputManager::instance()->logWarning(
+            QString("图层 '%1' 的CRS '%2' 缺少标准的EPSG代码，可能会影响部分功能，但仍将加载。")
+            .arg(layer->name()).arg(layerCrs.description())
+        );
+        // 我们选择接受它，并让QGIS尝试动态投影
+        return true;
+    }
+
+    // Case 3: 图层有一个合格的、带authid的CRS。一切正常。
+    return true;
+}
+
+void QGIS_dev::onAddDelimitedTextLayer()
+{
+    QString filePath = QFileDialog::getOpenFileName(this,
+        "选择一个分隔符文本文件",
+        QDir::homePath(),
+        "CSV (逗号分隔) (*.csv);;文本文件 (*.txt);;所有文件 (*.*)");
+
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    // ====================== 核心加固 ======================
+
+    // 1. 确保文件路径使用正斜杠
+    QString forwardSlashPath = filePath;
+    forwardSlashPath.replace('\\', '/');
+
+    // 2. 使用 QUrl 来安全地构造URI，它会自动处理特殊字符和协议前缀
+    QUrl fileUrl = QUrl::fromLocalFile(forwardSlashPath);
+
+    // 3. 构建参数部分
+    QUrlQuery query;
+    query.addQueryItem("encoding", "UTF-8");
+    query.addQueryItem("delimiter", ",");
+    query.addQueryItem("xField", "lon");
+    query.addQueryItem("yField", "lat");
+    query.addQueryItem("crs", "epsg:4326");
+    query.addQueryItem("spatialIndex", "yes");
+    query.addQueryItem("subsetIndex", "no");
+    query.addQueryItem("watchFile", "no");
+
+    // 4. 将参数附加到URL上
+    fileUrl.setQuery(query);
+
+    // 5. 从 QUrl 获取最终的、格式正确的URI字符串
+    QString uri = fileUrl.toString();
+
+    OutputManager::instance()->logMessage("构造的URI: " + uri); // 打印URI到日志，方便调试
+    // =======================================================
+
+    QString layerName = QFileInfo(filePath).baseName();
+    QgsVectorLayer* layer = new QgsVectorLayer(uri, layerName, "delimitedtext");
+
+    if (!layer || !layer->isValid()) {
+        // ... (错误信息对话框不变) ...
+        // +++ 增加更详细的错误日志 +++
+        OutputManager::instance()->logError("加载分隔符文本图层失败。");
+        OutputManager::instance()->logError("Provider 错误: " + layer->error().message());
+        delete layer;
+        return;
+    }
+
+    QgsProject::instance()->addMapLayer(layer);
+    m_mapCanvas->getCanvas()->zoomToFullExtent();
+    OutputManager::instance()->logMessage("成功加载分隔符文本图层: " + filePath);
 }

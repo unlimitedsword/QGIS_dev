@@ -72,8 +72,10 @@
   <ItemGroup>
     <QtRcc Include="QGIS_dev.qrc" />
     <QtMoc Include="QGIS_dev.h" />
+    <ClCompile Include="AttributeTableDialog.cpp" />
     <ClCompile Include="CustomLayerTreeView.cpp" />
     <ClCompile Include="FeatureSelectionTool.cpp" />
+    <ClCompile Include="FileLogger.cpp" />
     <ClCompile Include="MapCanvas.cpp" />
     <ClCompile Include="OutputWidget.cpp" />
     <ClCompile Include="Output_Manager.cpp" />
@@ -92,6 +94,12 @@
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="FeatureSelectionTool.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <QtMoc Include="FileLogger.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <QtMoc Include="AttributeTableDialog.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

@@ -1,11 +1,13 @@
 #include "CustomLayerTreeView.h"
 #include "Output_Manager.h" // 引入日志管理器
+#include "AttributeTableDialog.h"
 #include <QTreeView>
 #include <QStandardItemModel>
 #include <QVBoxLayout>
 #include <QVariant>
 #include <QMenu>
 #include <QColorDialog>
+#include <QItemSelection>
 #include <qgsmaplayer.h>
 #include <qgsvectorlayer.h>
 #include <qgssinglesymbolrenderer.h>
@@ -30,6 +32,9 @@ CustomLayerTreeView::CustomLayerTreeView(QgsMapCanvas* canvas, QWidget* parent)
 
     connect(m_model, &QStandardItemModel::itemChanged, this, &CustomLayerTreeView::onItemChanged);
     connect(m_treeView, &QTreeView::customContextMenuRequested, this, &CustomLayerTreeView::onCustomContextMenuRequested);
+    // +++ 连接QTreeView的selectionChanged信号到我们的新槽函数 +++
+    connect(m_treeView->selectionModel(), &QItemSelectionModel::selectionChanged,
+        this, &CustomLayerTreeView::onSelectionChanged);
 
     QVBoxLayout* layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -106,7 +111,22 @@ void CustomLayerTreeView::onCustomContextMenuRequested(const QPoint& pos)
 
     QMenu contextMenu(this);
 
-    // ==================== 关键修改 3: 添加重命名动作 ====================
+    // 只有矢量图层才有属性表
+    QgsVectorLayer* vlayer = qobject_cast<QgsVectorLayer*>(layer);
+    if (vlayer) {
+        QAction* openAttributeTableAction = contextMenu.addAction("打开属性表");
+        connect(openAttributeTableAction, &QAction::triggered, this, [=]() {
+            // ====================== 核心修改 ======================
+            // 调用新的构造函数，传入 vlayer 和 m_mapCanvas
+            AttributeTableDialog* dialog = new AttributeTableDialog(vlayer, m_mapCanvas, this->window());
+            // ========================================================
+            dialog->setAttribute(Qt::WA_DeleteOnClose);
+            dialog->show();
+            });
+        contextMenu.addSeparator();
+    }
+
+    // 添加重命名动作
     QAction* renameAction = contextMenu.addAction("重命名");
     connect(renameAction, &QAction::triggered, this, [=]() {
         m_treeView->edit(index); // <<< 核心：以编程方式启动编辑
@@ -280,4 +300,27 @@ void CustomLayerTreeView::clear()
     m_model->clear();
     m_model->setHorizontalHeaderLabels({ "Layers" });
     updateMapCanvasLayers(); // 清空画布
+}
+
+// +++ 实现新槽函数的逻辑 +++
+void CustomLayerTreeView::onSelectionChanged(const QItemSelection& selected, const QItemSelection& deselected)
+{
+
+    Q_UNUSED(deselected); // 不关心之前选中的是什么
+
+    QModelIndexList indexes = selected.indexes();
+    if (indexes.isEmpty()) {
+        // 如果没有选中任何项（例如，清空图层后），发出一个nullptr信号
+        emit currentLayerChanged(nullptr);
+        return;
+    }
+
+    // 通常我们只关心第一个被选中的项
+    QModelIndex currentIndex = indexes.first();
+    QStandardItem* item = m_model->itemFromIndex(currentIndex);
+    if (item) {
+        QgsMapLayer* layer = static_cast<QgsMapLayer*>(item->data(LayerPtrRole).value<void*>());
+        // 发出信号，将当前选中的图层指针传递出去
+        emit currentLayerChanged(layer);
+    }
 }

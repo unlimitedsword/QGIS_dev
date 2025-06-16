@@ -8,6 +8,7 @@ class QStandardItem;
 class QgsMapLayer;
 class QgsMapCanvas;
 class QModelIndex;
+class QItemSelection;
 
 class CustomLayerTreeView : public QWidget
 {
@@ -20,10 +21,15 @@ public:
 
 signals:
     void modelChanged(); // 新增信号
+    // +++ 新增信号，当选中项改变时发出 +++
+    void currentLayerChanged(QgsMapLayer* layer);
 
 public slots:
     void addLayer(QgsMapLayer* layer);
     void clear();
+
+    // +++ 新增槽函数，响应QTreeView自身的选中事件 +++
+    void onSelectionChanged(const QItemSelection& selected, const QItemSelection& deselected);
 
 private slots:
     void onItemChanged(QStandardItem* item);
@@ -33,6 +39,7 @@ private slots:
     // -- !! 新增的私有槽函数，用于处理排序 !! --
     void onMoveLayerUp(const QModelIndex& index);
     void onMoveLayerDown(const QModelIndex& index);
+
 
 private:
     void updateLayerItemIcon(QStandardItem* item, const QColor& color);

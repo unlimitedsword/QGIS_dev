@@ -23,16 +23,23 @@ MapCanvas::MapCanvas(QWidget* parent)
     m_qgsCanvas->setMapTool(m_panTool);
     m_panTool->setCursor(Qt::OpenHandCursor);
 
-    // --- 连接CRS和比例尺信号 ---
+    // ====================== 核心修正 ======================
+    // 删除所有主动设置 QgsProject::instance()->setCrs() 的代码。
+    // MapCanvas 的职责：只做一件事 —— 忠实地跟随 QgsProject 的CRS。
+
+    // 1. 启动时，将自己的目标CRS设置为当前项目的CRS (此时可能无效)
     m_qgsCanvas->setDestinationCrs(QgsProject::instance()->crs());
-    connect(QgsProject::instance(), &QgsProject::crsChanged, m_qgsCanvas, [this]() {
-        m_qgsCanvas->setDestinationCrs(QgsProject::instance()->crs());
+
+    // 2. 建立一个永久的连接：只要项目CRS变了，画布就跟着变。
+    connect(QgsProject::instance(), &QgsProject::crsChanged,
+        m_qgsCanvas, [this]() {
+            m_qgsCanvas->setDestinationCrs(QgsProject::instance()->crs());
         });
 
-    // !! 新增 !!: 连接QgsMapCanvas的比例尺变化信号到我们的私有槽
-    connect(m_qgsCanvas, &QgsMapCanvas::scaleChanged, this, &MapCanvas::onCanvasScaleChanged);
+    // ========================================================
 
-    // !! 新增 !!: 应用程序启动时，手动触发一次比例尺更新，以初始化显示
+    // 连接比例尺信号 (这部分不变)
+    connect(m_qgsCanvas, &QgsMapCanvas::scaleChanged, this, &MapCanvas::onCanvasScaleChanged);
     onCanvasScaleChanged(m_qgsCanvas->scale());
 }
 
@@ -64,12 +71,16 @@ void MapCanvas::zoomToLayer(QgsMapLayer* layer)
 
 void MapCanvas::zoomIn()
 {
-    m_qgsCanvas->zoomIn();
+    if (m_qgsCanvas) {
+        m_qgsCanvas->zoomIn(); // 将调用传递给QGIS画布
+    }
 }
 
 void MapCanvas::zoomOut()
 {
-    m_qgsCanvas->zoomOut();
+    if (m_qgsCanvas) {
+        m_qgsCanvas->zoomOut(); // 将调用传递给QGIS画布
+    }
 }
 
 // --- 新增私有槽的实现 ---

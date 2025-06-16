@@ -52,6 +52,12 @@
     <ClCompile Include="FeatureSelectionTool.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="FileLogger.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="AttributeTableDialog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="MapCanvas.h">
@@ -67,6 +73,12 @@
       <Filter>Header Files</Filter>
     </QtMoc>
     <QtMoc Include="FeatureSelectionTool.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="FileLogger.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
+    <QtMoc Include="AttributeTableDialog.h">
       <Filter>Header Files</Filter>
     </QtMoc>
   </ItemGroup>
