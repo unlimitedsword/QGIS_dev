@@ -40,6 +40,10 @@ private slots:
     void onMoveLayerUp(const QModelIndex& index);
     void onMoveLayerDown(const QModelIndex& index);
 
+    // 置于顶层/底层
+    void onMoveToTop(const QModelIndex& index);
+    void onMoveToBottom(const QModelIndex& index);
+
 
 private:
     void updateLayerItemIcon(QStandardItem* item, const QColor& color);

@@ -40,12 +40,12 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'">
-    <IncludePath>$(SolutionDir)libs\Qt5\include\QtXml;$(SolutionDir)libs\Qt5\include\QtWidgets;$(SolutionDir)libs\Qt5\include\QtGui;$(SolutionDir)libs\Qt5\include\QtCore;$(SolutionDir)libs\qgis-dev\include;$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)libs\Qt5\lib;$(SolutionDir)libs\qgis-dev\lib;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)libs\Qt5\include\QtXml;$(SolutionDir)libs\Qt5\include\QtWidgets;$(SolutionDir)libs\Qt5\include\QtGui;$(SolutionDir)libs\Qt5\include\QtCore;$(SolutionDir)libs\qgis-dev\include;$(SolutionDir)libs\gdal2.0.2\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)libs\Qt5\lib;$(SolutionDir)libs\qgis-dev\lib;$(SolutionDir)libs\gdal2.0.2\lib;$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <Link>
-      <AdditionalDependencies>qgis_core.lib;qgis_app.lib;qgis_gui.lib;Qt5Core.lib;Qt5Gui.lib;Qt5Widgets.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>qgis_core.lib;qgis_app.lib;qgis_gui.lib;Qt5Core.lib;Qt5Gui.lib;Qt5Widgets.lib;gdal_i.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ClCompile>
       <LanguageStandard>stdcpp17</LanguageStandard>
@@ -70,8 +70,15 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="BufferDialog.cpp" />
+    <ClCompile Include="RasterClipDialog.cpp" />
+    <ClCompile Include="RasterLayerPropertiesDialog.cpp" />
+    <ClCompile Include="ReprojectRasterDialog.cpp" />
+    <ClCompile Include="ResampleDialog.cpp" />
+    <ClCompile Include="SpatialJoinDialog.cpp" />
     <QtRcc Include="QGIS_dev.qrc" />
     <QtMoc Include="QGIS_dev.h" />
+    <ClCompile Include="AnalysisToolboxWidget.cpp" />
     <ClCompile Include="AttributeTableDialog.cpp" />
     <ClCompile Include="CustomLayerTreeView.cpp" />
     <ClCompile Include="FeatureSelectionTool.cpp" />
@@ -100,6 +107,27 @@
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="AttributeTableDialog.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <QtMoc Include="AnalysisToolboxWidget.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <QtMoc Include="RasterLayerPropertiesDialog.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <QtMoc Include="ResampleDialog.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <QtMoc Include="ReprojectRasterDialog.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <QtMoc Include="RasterClipDialog.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <QtMoc Include="BufferDialog.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <QtMoc Include="SpatialJoinDialog.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

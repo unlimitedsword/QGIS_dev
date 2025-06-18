@@ -4,6 +4,7 @@
 #include "OutputWidget.h"
 #include "CustomLayerTreeView.h"
 #include "FeatureSelectionTool.h"
+#include "AnalysisToolboxWidget.h"
 
 #include <QDockWidget>
 #include <QMenu>
@@ -30,6 +31,7 @@
 #include <qgsapplication.h> // 添加此行以包含 QgsApplication 的完整定义
 #include <qgsprojectionselectiondialog.h>
 
+const int LayerPtrRole = Qt::UserRole + 1;
 
 
 QGIS_dev::QGIS_dev(QWidget *parent)
@@ -104,20 +106,16 @@ void QGIS_dev::setupUI()
 
     setCentralWidget(m_mapCanvas);
 
-    // 将我们的 customLayerTreeView 放入DockWidget
+    // 将customLayerTreeView 放入DockWidget
     m_layerTreeDock = new QDockWidget("图层 (自定义)", this);
     m_layerTreeDock->setWidget(m_customLayerTreeView);
     addDockWidget(Qt::LeftDockWidgetArea, m_layerTreeDock);
 
-    // ====================== 核心修改：创建两个右侧Dock ======================
-    // a. 创建“空间分析”Dock
-    m_analysisToolsWidget = new QWidget(this); // (占位符 Widget)
-    QVBoxLayout* analysisLayout = new QVBoxLayout(m_analysisToolsWidget);
-    analysisLayout->addWidget(new QLabel("空间分析工具将在此处...", m_analysisToolsWidget));
-    analysisLayout->addStretch();
-    m_analysisToolsWidget->setLayout(analysisLayout);
+    // ====================== 创建两个右侧Dock ======================
+    // a. 创建“空间分析”Dock，并放入自定义Widget
+    m_analysisToolsWidget = new AnalysisToolboxWidget(this);
 
-    m_analysisDock = new QDockWidget("空间分析", this);
+    m_analysisDock = new QDockWidget("空间分析工具", this);
     m_analysisDock->setWidget(m_analysisToolsWidget);
 
     // b. 创建“输出”Dock
@@ -440,8 +438,8 @@ void QGIS_dev::onAddVectorLayer()
 
             QgsProject::instance()->addMapLayer(vectorLayer);
             updateProjectCrs();
-            //m_mapCanvas->zoomToLayer(vectorLayer);
-            m_mapCanvas->getCanvas()->zoomToFullExtent();
+            m_mapCanvas->zoomToLayer(vectorLayer);
+            //m_mapCanvas->getCanvas()->zoomToFullExtent();
             OutputManager::instance()->logMessage("成功加载矢量图层: " + copiedFileAbsolutePath);
         }
         else {
@@ -500,8 +498,8 @@ void QGIS_dev::onAddRasterLayer()
 
         QgsProject::instance()->addMapLayer(rasterLayer);
         updateProjectCrs();
-        //m_mapCanvas->zoomToLayer(rasterLayer);
-        m_mapCanvas->getCanvas()->zoomToFullExtent();
+        m_mapCanvas->zoomToLayer(rasterLayer);
+        //m_mapCanvas->getCanvas()->zoomToFullExtent();
         OutputManager::instance()->logMessage("成功加载栅格图层: " + copiedFileAbsolutePath);
     }
     else {

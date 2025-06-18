@@ -1,5 +1,3 @@
-// main.cpp (最终正确且逻辑无误的诊断版本)
-
 #pragma warning(disable:4996)
 #include "QGIS_dev.h"
 #include "FileLogger.h"
@@ -10,8 +8,10 @@
 #include <qgsapplication.h>
 #include <qgscoordinatereferencesystem.h>
 #include <qgsproviderregistry.h>
+#include <qgsmaplayer.h>
 #include <qdebug.h>
 #include <QMessageBox>
+#include <QMetaType>
 
 // 一个简单的函数，用于在屏幕上显示诊断信息
 void showDiagnosis(const QString& title, const QString& message) {
@@ -26,6 +26,9 @@ int main(int argc, char* argv[])
     // 这是所有UI操作的前提，必须是第一步。
     QgsApplication a(argc, argv, true);
     qDebug() << "STAGE 1 PASSED: QgsApplication instance created.";
+
+    // 注册 QgsMapLayer* 类型，让Qt的元对象系统在处理 QVariant 时能更好地识别它
+    qRegisterMetaType<QgsMapLayer*>("QgsMapLayer*");
 
     // === STAGE 2: 强制设置环境变量 ===
     // 此时 QApplication 已存在，但 QGIS 核心还未初始化。

@@ -1,6 +1,8 @@
 #include "CustomLayerTreeView.h"
 #include "Output_Manager.h" // 引入日志管理器
 #include "AttributeTableDialog.h"
+#include "RasterLayerPropertiesDialog.h"
+
 #include <QTreeView>
 #include <QStandardItemModel>
 #include <QVBoxLayout>
@@ -10,6 +12,7 @@
 #include <QItemSelection>
 #include <qgsmaplayer.h>
 #include <qgsvectorlayer.h>
+#include <qgsrasterlayer.h>
 #include <qgssinglesymbolrenderer.h>
 #include <qgssymbol.h>
 #include <qgsmapcanvas.h>
@@ -17,17 +20,14 @@
 #include <QMessageBox>
 #include <qgsproject.h> // 需要它来移除图层
 
-
 const int LayerPtrRole = Qt::UserRole + 1;
-
 CustomLayerTreeView::CustomLayerTreeView(QgsMapCanvas* canvas, QWidget* parent)
     : QWidget(parent), m_mapCanvas(canvas)
 {
     m_treeView = new QTreeView(this);
     m_model = new QStandardItemModel(this);
     m_treeView->setModel(m_model);
-    m_model->setHorizontalHeaderLabels({"Layers"});
-
+    m_model->setHorizontalHeaderLabels({ "Layers" });
     m_treeView->setContextMenuPolicy(Qt::CustomContextMenu);
 
     connect(m_model, &QStandardItemModel::itemChanged, this, &CustomLayerTreeView::onItemChanged);
@@ -40,16 +40,14 @@ CustomLayerTreeView::CustomLayerTreeView(QgsMapCanvas* canvas, QWidget* parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(m_treeView);
     setLayout(layout);
-}
 
+}
 CustomLayerTreeView::~CustomLayerTreeView()
 {
 }
-
 void CustomLayerTreeView::addLayer(QgsMapLayer* layer)
 {
     if (!layer) return;
-
     QStandardItem* item = new QStandardItem(layer->name());
     item->setCheckable(true);
     item->setCheckState(Qt::Checked);
@@ -64,15 +62,14 @@ void CustomLayerTreeView::addLayer(QgsMapLayer* layer)
             updateLayerItemIcon(item, renderer->symbol()->color());
         }
     }
-    
-    m_model->appendRow(item);
-}
 
+    // 将新图层插入到模型的第0行
+    m_model->insertRow(0, item);
+}
 // 当model的属性改变时立即同步
 void CustomLayerTreeView::onItemChanged(QStandardItem* item)
 {
     if (!item) return;
-
     // 获取关联的图层
     QgsMapLayer* layer = static_cast<QgsMapLayer*>(item->data(LayerPtrRole).value<void*>());
     if (!layer) return;
@@ -95,6 +92,7 @@ void CustomLayerTreeView::onItemChanged(QStandardItem* item)
     emit modelChanged(); // 可见性变化也应该标记为“脏”
 }
 
+
 // 右键菜单
 void CustomLayerTreeView::onCustomContextMenuRequested(const QPoint& pos)
 {
@@ -102,70 +100,78 @@ void CustomLayerTreeView::onCustomContextMenuRequested(const QPoint& pos)
     if (!index.isValid()) {
         return;
     }
-
     QStandardItem* item = m_model->itemFromIndex(index);
-    if (!item) return; // 增加安全检查
+    if (!item) return;
     QgsMapLayer* layer = static_cast<QgsMapLayer*>(item->data(LayerPtrRole).value<void*>());
-    if (!layer) return; // 增加安全检查
-
+    if (!layer) return;
 
     QMenu contextMenu(this);
+    QAction* action = nullptr; // 用于接收创建的QAction指针
 
-    // 只有矢量图层才有属性表
-    QgsVectorLayer* vlayer = qobject_cast<QgsVectorLayer*>(layer);
-    if (vlayer) {
-        QAction* openAttributeTableAction = contextMenu.addAction("打开属性表");
-        connect(openAttributeTableAction, &QAction::triggered, this, [=]() {
-            // ====================== 核心修改 ======================
-            // 调用新的构造函数，传入 vlayer 和 m_mapCanvas
+    // --- 1. 重命名 (通用) ---
+    action = contextMenu.addAction("重命名");
+    connect(action, &QAction::triggered, this, [=]() {
+        m_treeView->edit(index);
+        });
+
+    // --- 2. 修改颜色 (仅矢量) ---
+    if (auto vlayer = qobject_cast<QgsVectorLayer*>(layer)) {
+        action = contextMenu.addAction("修改颜色...");
+        connect(action, &QAction::triggered, this, [=]() {
+            this->onChangeLayerColor(layer); // 内部会再次cast，安全
+            });
+    }
+    contextMenu.addSeparator(); // 在编辑属性和移动顺序之间加分隔符
+
+    // --- 3. 排序功能 (通用) ---
+    action = contextMenu.addAction("上移一层");
+    connect(action, &QAction::triggered, this, [=]() { this->onMoveLayerUp(index); });
+    action->setEnabled(index.row() > 0);
+
+    action = contextMenu.addAction("下移一层");
+    connect(action, &QAction::triggered, this, [=]() { this->onMoveLayerDown(index); });
+    action->setEnabled(index.row() < m_model->rowCount() - 1);
+
+    contextMenu.addSeparator(); // 一层移动和顶/底移动之间加分隔符
+
+    action = contextMenu.addAction("置于顶层");
+    connect(action, &QAction::triggered, this, [=]() { this->onMoveToTop(index); });
+    action->setEnabled(index.row() > 0);
+
+    action = contextMenu.addAction("置于底层");
+    connect(action, &QAction::triggered, this, [=]() { this->onMoveToBottom(index); });
+    action->setEnabled(index.row() < m_model->rowCount() - 1);
+
+    contextMenu.addSeparator(); // 在排序和打开属性/删除之间加分隔符
+
+    // --- 4. 打开特定属性对话框 (根据类型) ---
+    if (auto vlayer = qobject_cast<QgsVectorLayer*>(layer)) {
+        action = contextMenu.addAction("打开属性表");
+        connect(action, &QAction::triggered, this, [=]() {
             AttributeTableDialog* dialog = new AttributeTableDialog(vlayer, m_mapCanvas, this->window());
-            // ========================================================
             dialog->setAttribute(Qt::WA_DeleteOnClose);
             dialog->show();
             });
+    }
+    else if (auto rlayer = qobject_cast<QgsRasterLayer*>(layer)) {
+        action = contextMenu.addAction("属性...");
+        connect(action, &QAction::triggered, this, [=]() {
+            RasterLayerPropertiesDialog* dialog = new RasterLayerPropertiesDialog(rlayer, this->window());
+            dialog->setAttribute(Qt::WA_DeleteOnClose);
+            dialog->show();
+            });
+    }
+    // (未来可以为其他图层类型添加 else if 分支)
+
+    // 只有在确实添加了“打开属性表”或“属性...”后才加分隔符
+    if (contextMenu.actions().size() > 0 && !contextMenu.actions().last()->isSeparator()) {
         contextMenu.addSeparator();
     }
 
-    // 添加重命名动作
-    QAction* renameAction = contextMenu.addAction("重命名");
-    connect(renameAction, &QAction::triggered, this, [=]() {
-        m_treeView->edit(index); // <<< 核心：以编程方式启动编辑
-        });
-    contextMenu.addSeparator();
 
-    // --- 修改颜色功能 (仅对矢量图层) ---
-    if (qobject_cast<QgsVectorLayer*>(layer)) {
-        QAction* changeColorAction = contextMenu.addAction("修改颜色...");
-        connect(changeColorAction, &QAction::triggered, this, [=]() {
-            this->onChangeLayerColor(layer);
-            });
-    }
-
-    // --- 上移/下移功能 ---
-    contextMenu.addSeparator(); // 添加一个分隔线，让UI更清晰
-
-    QAction* moveUpAction = contextMenu.addAction("上移一层");
-    QAction* moveDownAction = contextMenu.addAction("下移一层");
-
-    // 连接信号到新的槽函数，使用lambda传递索引
-    connect(moveUpAction, &QAction::triggered, this, [=]() { this->onMoveLayerUp(index); });
-    connect(moveDownAction, &QAction::triggered, this, [=]() { this->onMoveLayerDown(index); });
-
-    // !! 关键的UX逻辑：根据图层位置决定动作是否可用 !!
-    int currentRow = index.row();
-    if (currentRow == 0) {
-        // 如果是第一行，则“上移”不可用
-        moveUpAction->setEnabled(false);
-    }
-    if (currentRow == m_model->rowCount() - 1) {
-        // 如果是最后一行，则“下移”不可用
-        moveDownAction->setEnabled(false);
-    }
-
-    // --- !! 新增：删除图层功能 !! ---
-    contextMenu.addSeparator();
-    QAction* removeAction = contextMenu.addAction("删除图层");
-    connect(removeAction, &QAction::triggered, this, [=]() { this->onRemoveLayer(index); });
+    // --- 5. 删除图层 (通用，通常放最后) ---
+    action = contextMenu.addAction("删除图层");
+    connect(action, &QAction::triggered, this, [=]() { this->onRemoveLayer(index); });
 
     contextMenu.exec(m_treeView->viewport()->mapToGlobal(pos));
 }
@@ -182,7 +188,6 @@ void CustomLayerTreeView::onMoveLayerUp(const QModelIndex& index)
         emit modelChanged(); // <<< 发出信号
     }
 }
-
 void CustomLayerTreeView::onMoveLayerDown(const QModelIndex& index)
 {
     if (!index.isValid()) return;
@@ -196,19 +201,46 @@ void CustomLayerTreeView::onMoveLayerDown(const QModelIndex& index)
     }
 }
 
+void CustomLayerTreeView::onMoveToTop(const QModelIndex& index)
+{
+    if (!index.isValid() || index.row() == 0) return; // 如果已经是顶层，则不操作
+
+    // 从当前位置取出该行
+    QList<QStandardItem*> rowItems = m_model->takeRow(index.row());
+    // 将其插入到模型的第0行 (UI的顶层)
+    m_model->insertRow(0, rowItems);
+
+    updateMapCanvasLayers(); // 根据新的UI顺序刷新画布
+    m_treeView->setCurrentIndex(m_model->index(0, 0)); // 更新选中项
+    emit modelChanged();
+}
+
+void CustomLayerTreeView::onMoveToBottom(const QModelIndex& index)
+{
+    if (!index.isValid() || index.row() == m_model->rowCount() - 1) return; // 如果已经是底层，则不操作
+
+    // 从当前位置取出该行
+    QList<QStandardItem*> rowItems = m_model->takeRow(index.row());
+    // 将其追加到模型的末尾 (UI的底层)
+    m_model->appendRow(rowItems);
+
+    updateMapCanvasLayers(); // 根据新的UI顺序刷新画布
+    m_treeView->setCurrentIndex(m_model->index(m_model->rowCount() - 1, 0)); // 更新选中项
+    emit modelChanged();
+}
+
 
 void CustomLayerTreeView::onChangeLayerColor(QgsMapLayer* layer)
 {
     QgsVectorLayer* vectorLayer = qobject_cast<QgsVectorLayer*>(layer);
     if (!vectorLayer) return;
-
     // !! 修正: 对非QObject的类使用 dynamic_cast !!
     QgsSingleSymbolRenderer* renderer = dynamic_cast<QgsSingleSymbolRenderer*>(vectorLayer->renderer());
     if (!renderer) {
         qDebug() << "Cannot change color: layer does not use a single symbol renderer.";
         return;
     }
-    
+
     const QColor newColor = QColorDialog::getColor(renderer->symbol()->color(), this, "选择新颜色");
 
     if (newColor.isValid()) {
@@ -226,7 +258,6 @@ void CustomLayerTreeView::onChangeLayerColor(QgsMapLayer* layer)
         }
     }
 }
-
 void CustomLayerTreeView::updateLayerItemIcon(QStandardItem* item, const QColor& color)
 {
     if (!item) return;
@@ -234,13 +265,10 @@ void CustomLayerTreeView::updateLayerItemIcon(QStandardItem* item, const QColor&
     pixmap.fill(color);
     item->setIcon(QIcon(pixmap));
 }
-
-
 // --- !! 新增的槽函数实现 !! ---
 void CustomLayerTreeView::onRemoveLayer(const QModelIndex& index)
 {
     if (!index.isValid()) return;
-
     // 1. 获取图层和Item
     QStandardItem* item = m_model->itemFromIndex(index);
     if (!item) return;
@@ -270,30 +298,38 @@ void CustomLayerTreeView::onRemoveLayer(const QModelIndex& index)
     //    所以这一步可能不是必需的，但为了保险起见，可以保留。
     updateMapCanvasLayers();
     m_mapCanvas->refresh();
+
 }
+
 
 void CustomLayerTreeView::updateMapCanvasLayers()
 {
-    QList<QgsMapLayer*> visibleLayers;
-    // 渲染顺序是“从下往上”，所以我们遍历的顺序也应该是从列表底部到顶部
-    for (int i = 0; i < m_model->rowCount(); ++i)
+    QList<QgsMapLayer*> layersToRender;
+
+    // 从UI模型的顶部 (index 0, 用户看到的顶层) 开始遍历
+    for (int uiRow = 0; uiRow < m_model->rowCount(); ++uiRow)
     {
-        QStandardItem* item = m_model->item(i);
+        QStandardItem* item = m_model->item(uiRow);
         if (item && item->checkState() == Qt::Checked)
         {
             QVariant layerVariant = item->data(LayerPtrRole);
             if (layerVariant.isValid()) {
                 QgsMapLayer* layer = static_cast<QgsMapLayer*>(layerVariant.value<void*>());
-                // 注意：setLayers的顺序是绘制顺序，列表第一个元素在最底层
-                // 我们模型的顺序是“上层”在第0行，所以需要反向添加
-                visibleLayers.prepend(layer);
+                // 将UI列表中的图层，按顺序【追加】到渲染列表的【末尾】
+                layersToRender.append(layer);
             }
         }
     }
-    m_mapCanvas->setLayers(visibleLayers);
-    // m_mapCanvas->refresh(); // setLayers() 内部通常会调用 refresh
-    qDebug() << "Map canvas updated with" << visibleLayers.count() << "visible layers.";
+
+    m_mapCanvas->setLayers(layersToRender);
+    qDebug() << "Map canvas updated. UI Top (" << (m_model->rowCount() > 0 ? m_model->item(0)->text() : "N/A")
+        << ") is Map Top. Render order (bottom to top):";
+    for (QgsMapLayer* lyr : layersToRender) {
+        qDebug() << "  - " << lyr->name();
+    }
 }
+
+
 
 void CustomLayerTreeView::clear()
 {
@@ -301,11 +337,9 @@ void CustomLayerTreeView::clear()
     m_model->setHorizontalHeaderLabels({ "Layers" });
     updateMapCanvasLayers(); // 清空画布
 }
-
 // +++ 实现新槽函数的逻辑 +++
 void CustomLayerTreeView::onSelectionChanged(const QItemSelection& selected, const QItemSelection& deselected)
 {
-
     Q_UNUSED(deselected); // 不关心之前选中的是什么
 
     QModelIndexList indexes = selected.indexes();
@@ -323,4 +357,5 @@ void CustomLayerTreeView::onSelectionChanged(const QItemSelection& selected, con
         // 发出信号，将当前选中的图层指针传递出去
         emit currentLayerChanged(layer);
     }
+
 }

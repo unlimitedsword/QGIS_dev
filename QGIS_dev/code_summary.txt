@@ -1,7 +1,704 @@
+正在处理文件: AnalysisToolboxWidget.cpp
+(AnalysisToolboxWidget.cpp)
+// AnalysisToolboxWidget.cpp
+#include "AnalysisToolboxWidget.h"
+#include "ResampleDialog.h"
+#include "ReprojectRasterDialog.h"
+
+#include <QVBoxLayout>
+#include <QTreeView>
+#include <QStandardItemModel>
+#include <QDebug>
+
+// --- 引入未来会创建的工具对话框的头文件 (占位符) ---
+// #include "SpatialJoinDialog.h"
+// #include "BufferDialog.h"
+// ... 等等
+
+AnalysisToolboxWidget::AnalysisToolboxWidget(QWidget* parent)
+    : QWidget(parent)
+{
+    setupUI();
+}
+
+AnalysisToolboxWidget::~AnalysisToolboxWidget()
+{
+}
+
+void AnalysisToolboxWidget::setupUI()
+{
+    QVBoxLayout* mainLayout = new QVBoxLayout(this);
+
+    m_toolTreeView = new QTreeView(this);
+    m_toolModel = new QStandardItemModel(this);
+    m_toolModel->setHorizontalHeaderLabels({ "分析工具" }); // 设置表头
+    m_toolTreeView->setModel(m_toolModel);
+    m_toolTreeView->setHeaderHidden(false); // 显示表头，让它看起来更像一个工具箱
+    m_toolTreeView->setEditTriggers(QAbstractItemView::NoEditTriggers); // 禁止编辑
+
+    populateToolTree(); // 填充工具
+
+    connect(m_toolTreeView, &QTreeView::doubleClicked, this, &AnalysisToolboxWidget::onItemDoubleClicked);
+
+    mainLayout->addWidget(m_toolTreeView);
+    setLayout(mainLayout);
+}
+
+void AnalysisToolboxWidget::populateToolTree()
+{
+    // --- 1. 空间分析 ---
+    QStandardItem* spatialAnalysisGroup = new QStandardItem("空间分析");
+    spatialAnalysisGroup->setEditable(false); // 组节点不可编辑
+    // spatialAnalysisGroup->setIcon(QIcon(":/icons/group.png")); // 可选：设置图标
+    m_toolModel->appendRow(spatialAnalysisGroup);
+
+    QStandardItem* spatialJoinItem = new QStandardItem("空间连接 (点落入面)");
+    spatialJoinItem->setData(static_cast<int>(AnalysisToolId::SpatialJoin), ToolIdRole);
+    spatialJoinItem->setEditable(false);
+    // spatialJoinItem->setIcon(QIcon(":/icons/spatial_join.png"));
+    spatialAnalysisGroup->appendRow(spatialJoinItem);
+
+    QStandardItem* bufferItem = new QStandardItem("缓冲区分析");
+    bufferItem->setData(static_cast<int>(AnalysisToolId::Buffer), ToolIdRole);
+    bufferItem->setEditable(false);
+    spatialAnalysisGroup->appendRow(bufferItem);
+
+
+    // --- 2. 栅格数据处理 ---
+    QStandardItem* rasterGroup = new QStandardItem("栅格数据处理");
+    rasterGroup->setEditable(false);
+    m_toolModel->appendRow(rasterGroup);
+
+    QStandardItem* rasterStatsItem = new QStandardItem("波段统计");
+    rasterStatsItem->setData(static_cast<int>(AnalysisToolId::RasterStats), ToolIdRole);
+    rasterStatsItem->setEditable(false);
+    rasterGroup->appendRow(rasterStatsItem);
+
+    QStandardItem* rasterClipItem = new QStandardItem("地图裁剪");
+    rasterClipItem->setData(static_cast<int>(AnalysisToolId::RasterClip), ToolIdRole);
+    rasterClipItem->setEditable(false);
+    rasterGroup->appendRow(rasterClipItem);
+
+    QStandardItem* rasterResampleItem = new QStandardItem("重采样");
+    rasterResampleItem->setData(static_cast<int>(AnalysisToolId::RasterResample), ToolIdRole);
+    rasterResampleItem->setEditable(false);
+    rasterGroup->appendRow(rasterResampleItem);
+
+    QStandardItem* rasterReprojectItem = new QStandardItem("投影转换");
+    rasterReprojectItem->setData(static_cast<int>(AnalysisToolId::RasterReproject), ToolIdRole);
+    rasterReprojectItem->setEditable(false);
+    rasterGroup->appendRow(rasterReprojectItem);
+
+
+    // --- 3. 分区统计 ---
+    QStandardItem* zonalStatsGroup = new QStandardItem("分区统计");
+    zonalStatsGroup->setEditable(false);
+    m_toolModel->appendRow(zonalStatsGroup);
+
+    QStandardItem* zonalStatsItem = new QStandardItem("栅格分区统计");
+    zonalStatsItem->setData(static_cast<int>(AnalysisToolId::ZonalStats), ToolIdRole);
+    zonalStatsItem->setEditable(false);
+    zonalStatsGroup->appendRow(zonalStatsItem);
+
+    // 自动展开所有顶级项
+    for (int i = 0; i < m_toolModel->rowCount(); ++i) {
+        m_toolTreeView->expand(m_toolModel->index(i, 0));
+    }
+}
+
+void AnalysisToolboxWidget::onItemDoubleClicked(const QModelIndex& index)
+{
+    // 检查是否是叶子节点（即具体的工具项，而不是分组项）
+    QStandardItem* item = m_toolModel->itemFromIndex(index);
+    if (!item || item->hasChildren()) { // 如果是分组项，则不处理
+        return;
+    }
+
+    AnalysisToolId toolId = static_cast<AnalysisToolId>(item->data(ToolIdRole).toInt());
+
+    qDebug() << "Tool double clicked:" << item->text() << "with ID:" << static_cast<int>(toolId);
+
+    // 根据工具ID，创建并显示对应的对话框
+    // 这里是未来实现的核心，现在只是占位符
+    switch (toolId)
+    {
+    case AnalysisToolId::SpatialJoin:
+        // SpatialJoinDialog *sjDialog = new SpatialJoinDialog(this);
+        // sjDialog->exec();
+        qDebug() << "Should open SpatialJoinDialog";
+        break;
+    case AnalysisToolId::Buffer:
+        // BufferDialog *bDialog = new BufferDialog(this);
+        // bDialog->exec();
+        qDebug() << "Should open BufferDialog";
+        break;
+    case AnalysisToolId::RasterResample: // 重采样定义的ID
+    {
+        ResampleDialog* resampleDialog = new ResampleDialog(this);
+        resampleDialog->setAttribute(Qt::WA_DeleteOnClose);
+        resampleDialog->show();
+        qDebug() << "ResampleDialog opened.";
+    }
+    case AnalysisToolId::RasterReproject: // 假设这是您为投影转换定义的ID
+    {
+        ReprojectRasterDialog* reprojectDialog = new ReprojectRasterDialog(this);
+        reprojectDialog->setAttribute(Qt::WA_DeleteOnClose);
+        reprojectDialog->show();
+        qDebug() << "ReprojectRasterDialog opened.";
+    }
+    break;
+        break;
+        // ... 其他工具的处理 ...
+    default:
+        qWarning() << "Unknown tool ID:" << static_cast<int>(toolId);
+        break;
+    }
+}
+正在处理文件: AttributeTableDialog.cpp
+(AttributeTableDialog.cpp)
+#include "attributetabledialog.h"
+#include "Output_Manager.h"
+
+#include <qgsvectorlayer.h>
+#include <qgsvectorlayercache.h>
+#include <qgsattributetablemodel.h>
+#include <qgsattributetablefiltermodel.h>
+#include <qgsmapcanvas.h>
+#include <qgsexpression.h>
+#include <qgsexpressioncontext.h>
+#include <qgsexpressioncontextutils.h> // 包含这个头文件以获取全局上下文
+#include <QVariant>
+#include <QLabel>
+#include <QTableView>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QGroupBox>
+#include <QComboBox>
+#include <QRadioButton>
+#include <QPushButton>
+#include <QLineEdit>
+#include <QHeaderView>
+#include <QButtonGroup>
+#include <QDebug>
+#include <QMessageBox>
+#include <QItemSelectionModel>
+
+// ... 构造函数和析构函数保持不变 ...
+AttributeTableDialog::AttributeTableDialog(QgsVectorLayer* layer, QgsMapCanvas* canvas, QWidget* parent)
+    : QDialog(parent), m_layer(layer), m_canvas(canvas), m_currentSortOrder(Qt::AscendingOrder), m_deleteWarningShown(false)
+{
+    // ...
+    setWindowTitle(QString("属性表 - %1").arg(m_layer->name()));
+    resize(1100, 700); // 增大默认尺寸以容纳新控件
+    setupUI();
+}
+AttributeTableDialog::~AttributeTableDialog() {}
+
+
+void AttributeTableDialog::setupUI()
+{
+    // --- 主控制面板布局 ---
+    QHBoxLayout* controlLayout = new QHBoxLayout();
+
+    // --- 1. 字段选择 (始终显示，最左侧) ---
+    controlLayout->addWidget(new QLabel("选择字段:", this));
+    m_fieldComboBox = new QComboBox(this);
+    controlLayout->addWidget(m_fieldComboBox);
+
+    // --- 2. 操作模式选择 (始终显示，字段选择右侧) ---
+    QGroupBox* modeGroupBox = new QGroupBox("操作模式", this);
+    QHBoxLayout* modeLayout = new QHBoxLayout();
+    m_sortRadioButton = new QRadioButton("排序", this);
+    m_searchRadioButton = new QRadioButton("搜索", this);
+    QButtonGroup* modeGroup = new QButtonGroup(this);
+    modeGroup->addButton(m_sortRadioButton);
+    modeGroup->addButton(m_searchRadioButton);
+    modeLayout->addWidget(m_sortRadioButton);
+    modeLayout->addWidget(m_searchRadioButton);
+    modeGroupBox->setLayout(modeLayout);
+    controlLayout->addWidget(modeGroupBox);
+
+    // --- 3. 动态控件区域 (排序或搜索，会根据模式变化) ---
+    // 我们创建一个 QHBoxLayout 来容纳这部分，这样可以控制它们的相对顺序
+    QHBoxLayout* dynamicControlsLayout = new QHBoxLayout();
+
+    // a. 排序控件 (默认添加到 dynamicControlsLayout)
+    m_sortOrderButton = new QPushButton("升序", this);
+    dynamicControlsLayout->addWidget(m_sortOrderButton);
+
+    // b. 搜索控件 (默认添加到 dynamicControlsLayout)
+    m_searchLineEdit = new QLineEdit(this);
+    m_searchLineEdit->setPlaceholderText("输入搜索关键字...");
+    m_searchButton = new QPushButton("搜索", this);
+    dynamicControlsLayout->addWidget(m_searchLineEdit);
+    dynamicControlsLayout->addWidget(m_searchButton);
+
+    // 将这个动态控件布局添加到主控制布局
+    controlLayout->addLayout(dynamicControlsLayout);
+
+    // --- 4. 右侧固定操作按钮 (在所有动态控件之后，用伸缩项隔开) ---
+    controlLayout->addStretch(); // 添加一个伸缩项，将后续按钮推到最右边
+
+    // a. 反向选择按钮
+    m_invertSelectionButton = new QPushButton("反向选择", this);
+    m_invertSelectionButton->setIcon(QIcon("resource/images/反选.png"));
+    m_invertSelectionButton->setToolTip("选中所有当前未选中的行，并取消选中当前已选中的行");
+    controlLayout->addWidget(m_invertSelectionButton);
+
+    // b. 删除按钮 (最右侧)
+    m_deleteButton = new QPushButton("删除选中", this);
+    m_deleteButton->setIcon(QIcon("resource/images/删除.png"));
+    m_deleteButton->setToolTip("删除表格中所有选中的行");
+    QgsVectorDataProvider* provider = m_layer->dataProvider();
+    if (!provider || !(provider->capabilities())) {
+        m_deleteButton->setEnabled(false);
+        m_deleteButton->setToolTip("该图层的数据源不支持删除操作。");
+    }
+    controlLayout->addWidget(m_deleteButton);
+
+
+    // --- 2. 创建并设置 Table View ---
+    m_tableView = new QTableView(this); // **先创建**
+    m_tableView->setSortingEnabled(false);
+    m_tableView->setSelectionMode(QAbstractItemView::ExtendedSelection); // **后设置**
+    m_tableView->setSelectionBehavior(QAbstractItemView::SelectRows);
+
+
+    // --- 3. 创建并设置数据模型 ---
+    QgsVectorLayerCache* layerCache = new QgsVectorLayerCache(m_layer, 1000, this);
+    m_tableModel = new QgsAttributeTableModel(layerCache, this);
+    m_filterModel = new QgsAttributeTableFilterModel(m_canvas, m_tableModel, this);
+    m_tableView->setModel(m_filterModel);
+    m_tableModel->loadLayer();
+
+    // 在模型加载数据后，立即尝试同步图层中已有的选择到表格中
+    synchronizeTableSelectionWithLayer();
+
+    // --- 4. 组装主布局 ---
+    QVBoxLayout* mainLayout = new QVBoxLayout(this);
+    mainLayout->addLayout(controlLayout);
+    mainLayout->addWidget(m_tableView);
+    setLayout(mainLayout);
+
+
+    // --- 5. 连接信号和槽 ---
+    connect(m_fieldComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &AttributeTableDialog::onFieldSelectionChanged);
+    connect(m_sortOrderButton, &QPushButton::clicked, this, &AttributeTableDialog::onSortOrderToggle);
+    connect(m_searchButton, &QPushButton::clicked, this, &AttributeTableDialog::onSearchButtonClicked);
+    connect(m_sortRadioButton, &QRadioButton::toggled, this, &AttributeTableDialog::onFilterModeChanged);
+    connect(m_deleteButton, &QPushButton::clicked, this, &AttributeTableDialog::onDeleteSelectedFeatures);
+    connect(m_layer, &QgsVectorLayer::selectionChanged, this, &AttributeTableDialog::synchronizeTableSelectionWithLayer);
+    connect(m_invertSelectionButton, &QPushButton::clicked, this, &AttributeTableDialog::onInvertSelection); // +++ 连接新信号槽 +++
+
+    // --- 6. 设置初始状态 ---
+    populateFieldsComboBox();
+    m_sortRadioButton->setChecked(true);
+    updateControlsState();
+}
+
+// +++ 实现新增的槽函数和辅助函数 +++
+
+void AttributeTableDialog::populateFieldsComboBox()
+{
+    m_fieldComboBox->blockSignals(true); // 避免在填充时触发信号
+    m_fieldComboBox->clear();
+    m_fieldComboBox->addItem("--- (不选择字段) ---", -1); // 添加一个默认/空选项
+
+    const QgsFields fields = m_layer->fields();
+    for (int i = 0; i < fields.count(); ++i) {
+        m_fieldComboBox->addItem(fields.field(i).name(), i); // 显示字段名，存储字段索引
+    }
+    m_fieldComboBox->blockSignals(false);
+}
+
+void AttributeTableDialog::updateControlsState()
+{
+    bool fieldSelected = (m_fieldComboBox->currentIndex() > 0);
+
+    m_sortRadioButton->setEnabled(fieldSelected);
+    m_searchRadioButton->setEnabled(fieldSelected);
+
+    if (!fieldSelected) {
+        m_sortRadioButton->setChecked(false);
+        m_searchRadioButton->setChecked(false);
+    }
+
+    bool sortMode = m_sortRadioButton->isChecked();
+    bool searchMode = m_searchRadioButton->isChecked();
+
+    m_sortOrderButton->setVisible(sortMode && fieldSelected);
+    m_searchLineEdit->setVisible(searchMode && fieldSelected);
+    m_searchButton->setVisible(searchMode && fieldSelected);
+}
+
+// 当用户在下拉框中选择一个新字段时
+void AttributeTableDialog::onFieldSelectionChanged(int index)
+{
+    // 清除排序
+    m_filterModel->sort(-1, Qt::AscendingOrder);
+
+    // 清除过滤，并强制刷新视图
+    m_filterModel->setFilterMode(QgsAttributeTableFilterModel::ShowAll);
+    m_filterModel->setFilterExpression(QgsExpression(), QgsExpressionContext());
+    m_filterModel->invalidate(); // ++ 正确的刷新方式 ++
+
+    if (index > 0) {
+        m_sortRadioButton->setChecked(true);
+    }
+    updateControlsState();
+}
+
+
+// 当用户点击“升序/降序”按钮时
+void AttributeTableDialog::onSortOrderToggle()
+{
+    if (m_currentSortOrder == Qt::AscendingOrder) {
+        m_currentSortOrder = Qt::DescendingOrder;
+        m_sortOrderButton->setText("降序");
+    }
+    else {
+        m_currentSortOrder = Qt::AscendingOrder;
+        m_sortOrderButton->setText("升序");
+    }
+
+    int fieldIndex = m_fieldComboBox->currentData().toInt();
+    if (fieldIndex >= 0) {
+        // 排序前，确保是对所有行进行操作
+        m_filterModel->setFilterMode(QgsAttributeTableFilterModel::ShowAll);
+        m_filterModel->setFilterExpression(QgsExpression(), QgsExpressionContext()); // 清除可能存在的过滤器
+
+        // sort() 方法会自动处理视图更新
+        m_filterModel->sort(fieldIndex, m_currentSortOrder);
+    }
+}
+
+void AttributeTableDialog::onFilterModeChanged()
+{
+    // 当从“搜索”模式切换回“排序”模式时，清除过滤器
+    if (m_sortRadioButton->isChecked()) {
+        if (m_filterModel->filterMode() != QgsAttributeTableFilterModel::ShowAll ||
+            !m_filterModel->filterExpression().isEmpty()) {
+
+            qDebug() << "Mode switched to Sort. Clearing filter.";
+            m_filterModel->setFilterMode(QgsAttributeTableFilterModel::ShowAll);
+            m_filterModel->setFilterExpression(QgsExpression(), QgsExpressionContext());
+            m_filterModel->invalidate();
+        }
+    }
+    updateControlsState();
+}
+
+
+// 当用户点击“搜索”按钮时
+void AttributeTableDialog::onSearchButtonClicked()
+{
+    qDebug() << "------------------------------------------";
+    qDebug() << "[START] onSearchButtonClicked() called.";
+
+    // 字段选择检查
+    int fieldIndex = m_fieldComboBox->currentData().toInt();
+    qDebug() << "[DEBUG] Current field index from ComboBox:" << fieldIndex;
+    if (fieldIndex < 0) {
+        QMessageBox::information(this, "提示", "请先从下拉框中选择一个要搜索的字段。");
+        qDebug() << "------------------------------------------";
+        return;
+    }
+
+    // 获取搜索文本
+    QString searchText = m_searchLineEdit->text().trimmed();
+    qDebug() << "[DEBUG] Search text from LineEdit:" << "\"" << searchText << "\"";
+
+    // 处理空搜索
+    if (searchText.isEmpty()) {
+        qDebug() << "[ACTION] Clearing filter because search text is empty.";
+        m_filterModel->setFilterMode(QgsAttributeTableFilterModel::ShowAll);
+        m_filterModel->invalidate();
+
+        // 更新视图
+        if (m_tableView) {
+            m_tableView->viewport()->update();
+        }
+
+        qDebug() << "------------------------------------------";
+        return;
+    }
+
+    // 获取字段信息
+    QString fieldName = m_layer->fields().field(fieldIndex).name();
+    QMetaType::Type fieldType = static_cast<QMetaType::Type>(m_layer->fields().field(fieldIndex).type());
+
+    qDebug() << "[DEBUG] Field name:" << fieldName;
+    qDebug() << "[DEBUG] Field type (QVariant type):" << fieldType;
+    qDebug() << "[DEBUG] Field type name:" << m_layer->fields().field(fieldIndex).typeName();
+
+    // 根据字段类型构建表达式
+    QString filterString;
+    if (fieldType == QMetaType::Int || fieldType == QMetaType::LongLong ||
+        fieldType == QMetaType::Double || fieldType == QMetaType::ULongLong) {
+        bool isNumeric;
+        double numericValue = searchText.toDouble(&isNumeric);
+
+        if (isNumeric) {
+            filterString = QString("\"%1\" = %2").arg(fieldName).arg(numericValue);
+            qDebug() << "[INFO] Numeric field. Using exact match:" << filterString;
+        }
+        else {
+            filterString = QString("to_string(\"%1\") ILIKE '%%2%'").arg(fieldName).arg(searchText);
+            qDebug() << "[INFO] Numeric field with non-numeric search. Using string conversion:" << filterString;
+        }
+    }
+    else {
+        filterString = QString("\"%1\" ILIKE '%%2%'").arg(fieldName).arg(searchText);
+        qDebug() << "[INFO] String field. Using ILIKE:" << filterString;
+    }
+
+    qDebug() << "[DEBUG] Constructed filter string:" << filterString;
+
+    // 创建表达式
+    QgsExpression expression(filterString);
+    QgsExpressionContext context;
+    context.appendScopes(QgsExpressionContextUtils::globalProjectLayerScopes(m_layer));
+
+    if (!expression.prepare(&context)) {
+        qDebug() << "[ERROR] Expression preparation failed:" << expression.parserErrorString();
+        QMessageBox::critical(this, "表达式错误",
+            QString("无法解析搜索表达式:\n%1\n\n错误信息: %2")
+            .arg(expression.expression())
+            .arg(expression.parserErrorString()));
+        return;
+    }
+
+    // ===== 基于官方API的解决方案 =====
+    QgsFeatureRequest request;
+    request.setFilterExpression(expression);
+    request.setExpressionContext(context);
+
+    // 获取匹配的特征ID
+    QgsFeatureIds matchingIds;
+    QgsFeatureIterator it = m_layer->getFeatures(request);
+    QgsFeature feature;
+    while (it.nextFeature(feature)) {
+        matchingIds.insert(feature.id());
+    }
+
+    qDebug() << "[DEBUG] Found" << matchingIds.size() << "matching features";
+
+    // 使用官方API设置过滤特征
+    m_filterModel->setFilterMode(QgsAttributeTableFilterModel::ShowFilteredList);
+    m_filterModel->setFilteredFeatures(matchingIds);
+
+    // 强制刷新模型 - 官方推荐的更新方式
+    m_filterModel->invalidate();
+
+    // 可选：触发特征过滤信号
+    emit m_filterModel->featuresFiltered();
+    // ================================
+
+    // 更新视图
+    if (m_tableView) {
+        m_tableView->viewport()->update();
+    }
+
+    // 调试输出
+    qDebug() << "[DEBUG] After setting filtered features:";
+    qDebug() << "  - Filter mode: " << m_filterModel->filterMode();
+    qDebug() << "  - Filtered features count: " << m_filterModel->filteredFeatures().size();
+    qDebug() << "  - Row count in filter model: " << m_filterModel->rowCount();
+
+    qDebug() << "[END] Filter applied and view updated.";
+    qDebug() << "------------------------------------------";
+}
+
+// ====================== 新增：实现删除功能 ======================
+void AttributeTableDialog::onDeleteSelectedFeatures()
+{
+    if (!m_layer || !m_filterModel || !m_tableView) return;
+
+    // 1. 获取当前在表格视图中【实际被高亮选中】的行的模型索引
+    QModelIndexList selectedViewIndexes = m_tableView->selectionModel()->selectedRows();
+
+    if (selectedViewIndexes.isEmpty()) {
+        QMessageBox::information(this, "提示", "没有选中任何行进行删除。");
+        return;
+    }
+
+    // 2. 将这些视图索引转换为要素ID
+    QgsFeatureIds idsToDelete;
+    for (const QModelIndex& viewIndex : selectedViewIndexes) {
+        if (viewIndex.isValid()) {
+            QModelIndex sourceIndex = m_filterModel->mapToSource(viewIndex);
+            idsToDelete.insert(m_tableModel->rowToId(sourceIndex.row()));
+        }
+    }
+
+    if (idsToDelete.isEmpty()) {
+        // 这通常不应该发生，但作为保险
+        QMessageBox::information(this, "提示", "无法识别选中的要素。");
+        return;
+    }
+
+    // 3. 弹出确认对话框 (只在本次打开属性表时提示一次)
+    if (!m_deleteWarningShown) {
+        QMessageBox::StandardButton reply;
+        reply = QMessageBox::warning(this, "确认删除",
+            QString("您确定要永久删除选中的 %1 个要素吗？\n\n此操作无法撤销！").arg(idsToDelete.size()),
+            QMessageBox::Yes | QMessageBox::No);
+
+        if (reply == QMessageBox::No) {
+            return;
+        }
+        m_deleteWarningShown = true;
+    }
+
+    // 4. 执行删除操作 (这部分逻辑不变，是正确的)
+    if (!m_layer->isEditable()) {
+        if (!m_layer->startEditing()) {
+            QMessageBox::critical(this, "错误", "无法开启图层编辑模式，删除失败。");
+            return;
+        }
+    }
+    if (m_layer->dataProvider()->deleteFeatures(idsToDelete)) {
+        if (!m_layer->commitChanges()) {
+            QMessageBox::critical(this, "错误", "删除成功，但提交更改失败。请检查数据源。");
+            m_layer->rollBack();
+        }
+        else {
+            OutputManager::instance()->logMessage(QString("成功删除 %1 个要素。").arg(idsToDelete.size()));
+        }
+    }
+    else {
+        QMessageBox::critical(this, "错误", "从数据源删除要素失败。");
+        m_layer->rollBack();
+    }
+
+    // 5. 刷新地图和属性表
+    m_layer->triggerRepaint();
+    // 删除后，模型数据源已改变，让模型自己通知视图刷新
+    m_tableModel->loadLayer(); // 重新加载数据，这会强制刷新所有内容
+    // 或者更温和的方式，如果上面的loadLayer太慢：
+    // m_filterModel->invalidate(); 
+}
+
+// +++ 新增一个辅助函数，用于同步表格选择 +++
+void AttributeTableDialog::synchronizeTableSelectionWithLayer()
+{
+    if (!m_layer || !m_filterModel || !m_tableView) return;
+
+    // 1. 清除表格中当前所有的选择
+    m_tableView->selectionModel()->clearSelection();
+
+    // 2. 获取图层当前选中的要素ID
+    QgsFeatureIds selectedFids = m_layer->selectedFeatureIds();
+
+    if (selectedFids.isEmpty()) {
+        return; // 如果图层没有选中要素，则无需操作
+    }
+
+    // 3. 遍历选中的要素ID，在表格中找到对应的行并选中它们
+    QItemSelection selection;
+    for (const QgsFeatureId fid : selectedFids) {
+        // QgsAttributeTableFilterModel 有一个 fidToIndexList 方法可以找到对应的 ModelIndex
+        QModelIndexList viewIndexes = m_filterModel->fidToIndexList(fid);
+        for (const QModelIndex& viewIndex : viewIndexes) {
+            if (viewIndex.isValid()) {
+                // 我们要选中整行
+                QModelIndex left = m_filterModel->index(viewIndex.row(), 0);
+
+                QModelIndex right = m_filterModel->index(viewIndex.row(), m_filterModel->columnCount(QModelIndex()) - 1);
+
+                selection.select(left, right);
+            }
+        }
+    }
+
+    // 4. 应用新的选择到表格视图
+    if (!selection.isEmpty()) {
+        m_tableView->selectionModel()->select(selection, QItemSelectionModel::Select | QItemSelectionModel::Rows);
+        // 可选：滚动到第一个选中的行
+        if (!selection.indexes().isEmpty()) {
+            m_tableView->scrollTo(selection.indexes().first());
+        }
+    }
+}
+
+void AttributeTableDialog::onInvertSelection()
+{
+    if (!m_layer || !m_filterModel || !m_tableView) return;
+
+    qDebug() << "[START] onInvertSelection called.";
+
+    // 1. 获取当前表格视图中【所有可见行】的模型索引
+    QList<QModelIndex> allVisibleViewIndexes;
+    for (int row = 0; row < m_filterModel->rowCount(); ++row) {
+        allVisibleViewIndexes.append(m_filterModel->index(row, 0));
+    }
+
+    if (allVisibleViewIndexes.isEmpty()) {
+        qDebug() << "[INFO] No rows in current view. Nothing to invert.";
+        return;
+    }
+
+    // 2. 获取当前在表格视图中【实际被高亮选中】的行的模型索引
+    QModelIndexList currentlySelectedViewIndexes = m_tableView->selectionModel()->selectedRows();
+
+    // 3. 创建一个新的QItemSelection，用于存储反选后的结果
+    QItemSelection newSelection;
+
+    // 4. 遍历所有可见行
+    for (const QModelIndex& viewIndex : allVisibleViewIndexes) {
+        if (viewIndex.isValid()) {
+            bool wasSelected = false;
+            // 检查这一行之前是否被选中
+            for (const QModelIndex& selectedIdx : currentlySelectedViewIndexes) {
+                if (selectedIdx.row() == viewIndex.row()) {
+                    wasSelected = true;
+                    break;
+                }
+            }
+
+            if (!wasSelected) {
+                // 如果这行之前没被选中，现在就选中它
+                QModelIndex left = m_filterModel->index(viewIndex.row(), 0);
+                QModelIndex right = m_filterModel->index(viewIndex.row(), m_filterModel->columnCount(QModelIndex()) - 1);
+                newSelection.select(left, right);
+            }
+            // 如果这行之前被选中了，那么在新的selection里它就是未选中状态 (因为我们从空selection开始构建)
+        }
+    }
+
+    // 5. 应用新的选择到表格视图
+    //    a. 先清除旧的视觉选择
+    m_tableView->selectionModel()->clearSelection();
+    //    b. 再应用新的视觉选择
+    if (!newSelection.isEmpty()) {
+        m_tableView->selectionModel()->select(newSelection, QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    }
+
+    // 6. **核心：根据表格UI的最新选择状态，去更新图层的选择集**
+    QgsFeatureIds fidsToSelectInLayer;
+    QModelIndexList finalSelectedViewIndexes = m_tableView->selectionModel()->selectedRows();
+    for (const QModelIndex& viewIndex : finalSelectedViewIndexes) {
+        if (viewIndex.isValid()) {
+            QModelIndex sourceIndex = m_filterModel->mapToSource(viewIndex);
+            fidsToSelectInLayer.insert(m_tableModel->rowToId(sourceIndex.row()));
+        }
+    }
+
+    // 更新图层选择集（先清空，再设置）
+    m_layer->removeSelection();
+    if (!fidsToSelectInLayer.isEmpty()) {
+        m_layer->selectByIds(fidsToSelectInLayer);
+    }
+
+    qDebug() << "[END] Invert selection finished. UI selection updated. Layer selected count:" << m_layer->selectedFeatureCount();
+}
 正在处理文件: CustomLayerTreeView.cpp
 (CustomLayerTreeView.cpp)
 #include "CustomLayerTreeView.h"
 #include "Output_Manager.h" // 引入日志管理器
+#include "AttributeTableDialog.h"
+#include "RasterLayerPropertiesDialog.h"
+
 #include <QTreeView>
 #include <QStandardItemModel>
 #include <QVBoxLayout>
@@ -11,6 +708,7 @@
 #include <QItemSelection>
 #include <qgsmaplayer.h>
 #include <qgsvectorlayer.h>
+#include <qgsrasterlayer.h>
 #include <qgssinglesymbolrenderer.h>
 #include <qgssymbol.h>
 #include <qgsmapcanvas.h>
@@ -18,17 +716,14 @@
 #include <QMessageBox>
 #include <qgsproject.h> // 需要它来移除图层
 
-
 const int LayerPtrRole = Qt::UserRole + 1;
-
 CustomLayerTreeView::CustomLayerTreeView(QgsMapCanvas* canvas, QWidget* parent)
     : QWidget(parent), m_mapCanvas(canvas)
 {
     m_treeView = new QTreeView(this);
     m_model = new QStandardItemModel(this);
     m_treeView->setModel(m_model);
-    m_model->setHorizontalHeaderLabels({"Layers"});
-
+    m_model->setHorizontalHeaderLabels({ "Layers" });
     m_treeView->setContextMenuPolicy(Qt::CustomContextMenu);
 
     connect(m_model, &QStandardItemModel::itemChanged, this, &CustomLayerTreeView::onItemChanged);
@@ -41,16 +736,14 @@ CustomLayerTreeView::CustomLayerTreeView(QgsMapCanvas* canvas, QWidget* parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(m_treeView);
     setLayout(layout);
-}
 
+}
 CustomLayerTreeView::~CustomLayerTreeView()
 {
 }
-
 void CustomLayerTreeView::addLayer(QgsMapLayer* layer)
 {
     if (!layer) return;
-
     QStandardItem* item = new QStandardItem(layer->name());
     item->setCheckable(true);
     item->setCheckState(Qt::Checked);
@@ -65,15 +758,14 @@ void CustomLayerTreeView::addLayer(QgsMapLayer* layer)
             updateLayerItemIcon(item, renderer->symbol()->color());
         }
     }
-    
-    m_model->appendRow(item);
-}
 
+    // 将新图层插入到模型的第0行
+    m_model->insertRow(0, item);
+}
 // 当model的属性改变时立即同步
 void CustomLayerTreeView::onItemChanged(QStandardItem* item)
 {
     if (!item) return;
-
     // 获取关联的图层
     QgsMapLayer* layer = static_cast<QgsMapLayer*>(item->data(LayerPtrRole).value<void*>());
     if (!layer) return;
@@ -96,6 +788,7 @@ void CustomLayerTreeView::onItemChanged(QStandardItem* item)
     emit modelChanged(); // 可见性变化也应该标记为“脏”
 }
 
+
 // 右键菜单
 void CustomLayerTreeView::onCustomContextMenuRequested(const QPoint& pos)
 {
@@ -103,55 +796,78 @@ void CustomLayerTreeView::onCustomContextMenuRequested(const QPoint& pos)
     if (!index.isValid()) {
         return;
     }
-
     QStandardItem* item = m_model->itemFromIndex(index);
-    if (!item) return; // 增加安全检查
+    if (!item) return;
     QgsMapLayer* layer = static_cast<QgsMapLayer*>(item->data(LayerPtrRole).value<void*>());
-    if (!layer) return; // 增加安全检查
-
+    if (!layer) return;
 
     QMenu contextMenu(this);
+    QAction* action = nullptr; // 用于接收创建的QAction指针
 
-    // ==================== 关键修改 3: 添加重命名动作 ====================
-    QAction* renameAction = contextMenu.addAction("重命名");
-    connect(renameAction, &QAction::triggered, this, [=]() {
-        m_treeView->edit(index); // <<< 核心：以编程方式启动编辑
+    // --- 1. 重命名 (通用) ---
+    action = contextMenu.addAction("重命名");
+    connect(action, &QAction::triggered, this, [=]() {
+        m_treeView->edit(index);
         });
-    contextMenu.addSeparator();
 
-    // --- 修改颜色功能 (仅对矢量图层) ---
-    if (qobject_cast<QgsVectorLayer*>(layer)) {
-        QAction* changeColorAction = contextMenu.addAction("修改颜色...");
-        connect(changeColorAction, &QAction::triggered, this, [=]() {
-            this->onChangeLayerColor(layer);
+    // --- 2. 修改颜色 (仅矢量) ---
+    if (auto vlayer = qobject_cast<QgsVectorLayer*>(layer)) {
+        action = contextMenu.addAction("修改颜色...");
+        connect(action, &QAction::triggered, this, [=]() {
+            this->onChangeLayerColor(layer); // 内部会再次cast，安全
             });
     }
+    contextMenu.addSeparator(); // 在编辑属性和移动顺序之间加分隔符
 
-    // --- 上移/下移功能 ---
-    contextMenu.addSeparator(); // 添加一个分隔线，让UI更清晰
+    // --- 3. 排序功能 (通用) ---
+    action = contextMenu.addAction("上移一层");
+    connect(action, &QAction::triggered, this, [=]() { this->onMoveLayerUp(index); });
+    action->setEnabled(index.row() > 0);
 
-    QAction* moveUpAction = contextMenu.addAction("上移一层");
-    QAction* moveDownAction = contextMenu.addAction("下移一层");
+    action = contextMenu.addAction("下移一层");
+    connect(action, &QAction::triggered, this, [=]() { this->onMoveLayerDown(index); });
+    action->setEnabled(index.row() < m_model->rowCount() - 1);
 
-    // 连接信号到新的槽函数，使用lambda传递索引
-    connect(moveUpAction, &QAction::triggered, this, [=]() { this->onMoveLayerUp(index); });
-    connect(moveDownAction, &QAction::triggered, this, [=]() { this->onMoveLayerDown(index); });
+    contextMenu.addSeparator(); // 一层移动和顶/底移动之间加分隔符
 
-    // !! 关键的UX逻辑：根据图层位置决定动作是否可用 !!
-    int currentRow = index.row();
-    if (currentRow == 0) {
-        // 如果是第一行，则“上移”不可用
-        moveUpAction->setEnabled(false);
+    action = contextMenu.addAction("置于顶层");
+    connect(action, &QAction::triggered, this, [=]() { this->onMoveToTop(index); });
+    action->setEnabled(index.row() > 0);
+
+    action = contextMenu.addAction("置于底层");
+    connect(action, &QAction::triggered, this, [=]() { this->onMoveToBottom(index); });
+    action->setEnabled(index.row() < m_model->rowCount() - 1);
+
+    contextMenu.addSeparator(); // 在排序和打开属性/删除之间加分隔符
+
+    // --- 4. 打开特定属性对话框 (根据类型) ---
+    if (auto vlayer = qobject_cast<QgsVectorLayer*>(layer)) {
+        action = contextMenu.addAction("打开属性表");
+        connect(action, &QAction::triggered, this, [=]() {
+            AttributeTableDialog* dialog = new AttributeTableDialog(vlayer, m_mapCanvas, this->window());
+            dialog->setAttribute(Qt::WA_DeleteOnClose);
+            dialog->show();
+            });
     }
-    if (currentRow == m_model->rowCount() - 1) {
-        // 如果是最后一行，则“下移”不可用
-        moveDownAction->setEnabled(false);
+    else if (auto rlayer = qobject_cast<QgsRasterLayer*>(layer)) {
+        action = contextMenu.addAction("属性...");
+        connect(action, &QAction::triggered, this, [=]() {
+            RasterLayerPropertiesDialog* dialog = new RasterLayerPropertiesDialog(rlayer, this->window());
+            dialog->setAttribute(Qt::WA_DeleteOnClose);
+            dialog->show();
+            });
+    }
+    // (未来可以为其他图层类型添加 else if 分支)
+
+    // 只有在确实添加了“打开属性表”或“属性...”后才加分隔符
+    if (contextMenu.actions().size() > 0 && !contextMenu.actions().last()->isSeparator()) {
+        contextMenu.addSeparator();
     }
 
-    // --- !! 新增：删除图层功能 !! ---
-    contextMenu.addSeparator();
-    QAction* removeAction = contextMenu.addAction("删除图层");
-    connect(removeAction, &QAction::triggered, this, [=]() { this->onRemoveLayer(index); });
+
+    // --- 5. 删除图层 (通用，通常放最后) ---
+    action = contextMenu.addAction("删除图层");
+    connect(action, &QAction::triggered, this, [=]() { this->onRemoveLayer(index); });
 
     contextMenu.exec(m_treeView->viewport()->mapToGlobal(pos));
 }
@@ -168,7 +884,6 @@ void CustomLayerTreeView::onMoveLayerUp(const QModelIndex& index)
         emit modelChanged(); // <<< 发出信号
     }
 }
-
 void CustomLayerTreeView::onMoveLayerDown(const QModelIndex& index)
 {
     if (!index.isValid()) return;
@@ -182,19 +897,46 @@ void CustomLayerTreeView::onMoveLayerDown(const QModelIndex& index)
     }
 }
 
+void CustomLayerTreeView::onMoveToTop(const QModelIndex& index)
+{
+    if (!index.isValid() || index.row() == 0) return; // 如果已经是顶层，则不操作
+
+    // 从当前位置取出该行
+    QList<QStandardItem*> rowItems = m_model->takeRow(index.row());
+    // 将其插入到模型的第0行 (UI的顶层)
+    m_model->insertRow(0, rowItems);
+
+    updateMapCanvasLayers(); // 根据新的UI顺序刷新画布
+    m_treeView->setCurrentIndex(m_model->index(0, 0)); // 更新选中项
+    emit modelChanged();
+}
+
+void CustomLayerTreeView::onMoveToBottom(const QModelIndex& index)
+{
+    if (!index.isValid() || index.row() == m_model->rowCount() - 1) return; // 如果已经是底层，则不操作
+
+    // 从当前位置取出该行
+    QList<QStandardItem*> rowItems = m_model->takeRow(index.row());
+    // 将其追加到模型的末尾 (UI的底层)
+    m_model->appendRow(rowItems);
+
+    updateMapCanvasLayers(); // 根据新的UI顺序刷新画布
+    m_treeView->setCurrentIndex(m_model->index(m_model->rowCount() - 1, 0)); // 更新选中项
+    emit modelChanged();
+}
+
 
 void CustomLayerTreeView::onChangeLayerColor(QgsMapLayer* layer)
 {
     QgsVectorLayer* vectorLayer = qobject_cast<QgsVectorLayer*>(layer);
     if (!vectorLayer) return;
-
     // !! 修正: 对非QObject的类使用 dynamic_cast !!
     QgsSingleSymbolRenderer* renderer = dynamic_cast<QgsSingleSymbolRenderer*>(vectorLayer->renderer());
     if (!renderer) {
         qDebug() << "Cannot change color: layer does not use a single symbol renderer.";
         return;
     }
-    
+
     const QColor newColor = QColorDialog::getColor(renderer->symbol()->color(), this, "选择新颜色");
 
     if (newColor.isValid()) {
@@ -212,7 +954,6 @@ void CustomLayerTreeView::onChangeLayerColor(QgsMapLayer* layer)
         }
     }
 }
-
 void CustomLayerTreeView::updateLayerItemIcon(QStandardItem* item, const QColor& color)
 {
     if (!item) return;
@@ -220,13 +961,10 @@ void CustomLayerTreeView::updateLayerItemIcon(QStandardItem* item, const QColor&
     pixmap.fill(color);
     item->setIcon(QIcon(pixmap));
 }
-
-
 // --- !! 新增的槽函数实现 !! ---
 void CustomLayerTreeView::onRemoveLayer(const QModelIndex& index)
 {
     if (!index.isValid()) return;
-
     // 1. 获取图层和Item
     QStandardItem* item = m_model->itemFromIndex(index);
     if (!item) return;
@@ -256,30 +994,38 @@ void CustomLayerTreeView::onRemoveLayer(const QModelIndex& index)
     //    所以这一步可能不是必需的，但为了保险起见，可以保留。
     updateMapCanvasLayers();
     m_mapCanvas->refresh();
+
 }
+
 
 void CustomLayerTreeView::updateMapCanvasLayers()
 {
-    QList<QgsMapLayer*> visibleLayers;
-    // 渲染顺序是“从下往上”，所以我们遍历的顺序也应该是从列表底部到顶部
-    for (int i = 0; i < m_model->rowCount(); ++i)
+    QList<QgsMapLayer*> layersToRender;
+
+    // 从UI模型的顶部 (index 0, 用户看到的顶层) 开始遍历
+    for (int uiRow = 0; uiRow < m_model->rowCount(); ++uiRow)
     {
-        QStandardItem* item = m_model->item(i);
+        QStandardItem* item = m_model->item(uiRow);
         if (item && item->checkState() == Qt::Checked)
         {
             QVariant layerVariant = item->data(LayerPtrRole);
             if (layerVariant.isValid()) {
                 QgsMapLayer* layer = static_cast<QgsMapLayer*>(layerVariant.value<void*>());
-                // 注意：setLayers的顺序是绘制顺序，列表第一个元素在最底层
-                // 我们模型的顺序是“上层”在第0行，所以需要反向添加
-                visibleLayers.prepend(layer);
+                // 将UI列表中的图层，按顺序【追加】到渲染列表的【末尾】
+                layersToRender.append(layer);
             }
         }
     }
-    m_mapCanvas->setLayers(visibleLayers);
-    // m_mapCanvas->refresh(); // setLayers() 内部通常会调用 refresh
-    qDebug() << "Map canvas updated with" << visibleLayers.count() << "visible layers.";
+
+    m_mapCanvas->setLayers(layersToRender);
+    qDebug() << "Map canvas updated. UI Top (" << (m_model->rowCount() > 0 ? m_model->item(0)->text() : "N/A")
+        << ") is Map Top. Render order (bottom to top):";
+    for (QgsMapLayer* lyr : layersToRender) {
+        qDebug() << "  - " << lyr->name();
+    }
 }
+
+
 
 void CustomLayerTreeView::clear()
 {
@@ -287,11 +1033,9 @@ void CustomLayerTreeView::clear()
     m_model->setHorizontalHeaderLabels({ "Layers" });
     updateMapCanvasLayers(); // 清空画布
 }
-
 // +++ 实现新槽函数的逻辑 +++
 void CustomLayerTreeView::onSelectionChanged(const QItemSelection& selected, const QItemSelection& deselected)
 {
-
     Q_UNUSED(deselected); // 不关心之前选中的是什么
 
     QModelIndexList indexes = selected.indexes();
@@ -309,8 +1053,8 @@ void CustomLayerTreeView::onSelectionChanged(const QItemSelection& selected, con
         // 发出信号，将当前选中的图层指针传递出去
         emit currentLayerChanged(layer);
     }
-}
 
+}
 正在处理文件: FeatureSelectionTool.cpp
 (FeatureSelectionTool.cpp)
 #include "featureselectiontool.h"
@@ -499,8 +1243,6 @@ void FileLogger::onMessageLogged(const QString& message, const QString& type)
 }
 正在处理文件: main.cpp
 (main.cpp)
-// main.cpp (最终正确且逻辑无误的诊断版本)
-
 #pragma warning(disable:4996)
 #include "QGIS_dev.h"
 #include "FileLogger.h"
@@ -511,8 +1253,10 @@ void FileLogger::onMessageLogged(const QString& message, const QString& type)
 #include <qgsapplication.h>
 #include <qgscoordinatereferencesystem.h>
 #include <qgsproviderregistry.h>
+#include <qgsmaplayer.h>
 #include <qdebug.h>
 #include <QMessageBox>
+#include <QMetaType>
 
 // 一个简单的函数，用于在屏幕上显示诊断信息
 void showDiagnosis(const QString& title, const QString& message) {
@@ -527,6 +1271,9 @@ int main(int argc, char* argv[])
     // 这是所有UI操作的前提，必须是第一步。
     QgsApplication a(argc, argv, true);
     qDebug() << "STAGE 1 PASSED: QgsApplication instance created.";
+
+    // 注册 QgsMapLayer* 类型，让Qt的元对象系统在处理 QVariant 时能更好地识别它
+    qRegisterMetaType<QgsMapLayer*>("QgsMapLayer*");
 
     // === STAGE 2: 强制设置环境变量 ===
     // 此时 QApplication 已存在，但 QGIS 核心还未初始化。
@@ -766,6 +1513,7 @@ void OutputManager::logError(const QString& message) {
 #include "OutputWidget.h"
 #include "CustomLayerTreeView.h"
 #include "FeatureSelectionTool.h"
+#include "AnalysisToolboxWidget.h"
 
 #include <QDockWidget>
 #include <QMenu>
@@ -792,6 +1540,7 @@ void OutputManager::logError(const QString& message) {
 #include <qgsapplication.h> // 添加此行以包含 QgsApplication 的完整定义
 #include <qgsprojectionselectiondialog.h>
 
+const int LayerPtrRole = Qt::UserRole + 1;
 
 
 QGIS_dev::QGIS_dev(QWidget *parent)
@@ -866,20 +1615,16 @@ void QGIS_dev::setupUI()
 
     setCentralWidget(m_mapCanvas);
 
-    // 将我们的 customLayerTreeView 放入DockWidget
+    // 将customLayerTreeView 放入DockWidget
     m_layerTreeDock = new QDockWidget("图层 (自定义)", this);
     m_layerTreeDock->setWidget(m_customLayerTreeView);
     addDockWidget(Qt::LeftDockWidgetArea, m_layerTreeDock);
 
-    // ====================== 核心修改：创建两个右侧Dock ======================
-    // a. 创建“空间分析”Dock
-    m_analysisToolsWidget = new QWidget(this); // (占位符 Widget)
-    QVBoxLayout* analysisLayout = new QVBoxLayout(m_analysisToolsWidget);
-    analysisLayout->addWidget(new QLabel("空间分析工具将在此处...", m_analysisToolsWidget));
-    analysisLayout->addStretch();
-    m_analysisToolsWidget->setLayout(analysisLayout);
+    // ====================== 创建两个右侧Dock ======================
+    // a. 创建“空间分析”Dock，并放入自定义Widget
+    m_analysisToolsWidget = new AnalysisToolboxWidget(this);
 
-    m_analysisDock = new QDockWidget("空间分析", this);
+    m_analysisDock = new QDockWidget("空间分析工具", this);
     m_analysisDock->setWidget(m_analysisToolsWidget);
 
     // b. 创建“输出”Dock
@@ -1587,6 +2332,1189 @@ void QGIS_dev::onAddDelimitedTextLayer()
     m_mapCanvas->getCanvas()->zoomToFullExtent();
     OutputManager::instance()->logMessage("成功加载分隔符文本图层: " + filePath);
 }
+正在处理文件: RasterLayerPropertiesDialog.cpp
+(RasterLayerPropertiesDialog.cpp)
+// RasterLayerPropertiesDialog.cpp
+#include "RasterLayerPropertiesDialog.h"
+#include <qgsrasterlayer.h>
+#include <qgscoordinatereferencesystem.h>
+#include <qgsrectangle.h>
+#include <qgsrasterbandstats.h>
+#include "gdal_priv.h"
+#include "cpl_conv.h"
+#include <QVBoxLayout>
+#include <QLabel>
+#include <QTableWidget>
+#include <QTextEdit>
+#include <QHeaderView>
+#include <QGroupBox>
+#include <QDebug>
+#include <QPushButton>
+#include <QFile>
+
+RasterLayerPropertiesDialog::RasterLayerPropertiesDialog(QgsRasterLayer* layer, QWidget* parent)
+    : QDialog(parent), m_rasterLayer(layer)
+{
+    if (!m_rasterLayer || !m_rasterLayer->isValid()) {
+        qWarning() << "RasterLayerPropertiesDialog created with invalid layer.";
+        // 如果在构造时就出错，最好不要继续执行setupUI，可以简单地reject
+        // QTimer::singleShot(0, this, &QDialog::reject); // 异步关闭，避免在构造中直接reject可能的问题
+        return; // 或者直接返回，让调用者检查并处理
+    }
+
+    setWindowTitle(QString("栅格图层属性 - %1").arg(m_rasterLayer->name()));
+    resize(700, 650); // 尝试一个更大的尺寸
+    setupUI();
+    populateGeneralInfo();
+    populateAllBandStatistics(); // 初始化时就显示所有波段统计
+}
+
+RasterLayerPropertiesDialog::~RasterLayerPropertiesDialog()
+{
+}
+
+void RasterLayerPropertiesDialog::setupUI()
+{
+    QVBoxLayout* mainLayout = new QVBoxLayout(this);
+
+    // --- 1. 基本信息组 ---
+    QGroupBox* infoGroup = new QGroupBox("基本信息", this);
+    QVBoxLayout* infoLayout = new QVBoxLayout(infoGroup);
+    m_infoTableWidget = new QTableWidget(this);
+    m_infoTableWidget->setColumnCount(2);
+    m_infoTableWidget->setHorizontalHeaderLabels({ "属性", "值" });
+
+    m_infoTableWidget->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents); // “属性”列根据内容自动调整
+    m_infoTableWidget->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);       // “值”列自动拉伸填充
+
+    m_infoTableWidget->horizontalHeader()->setStretchLastSection(true);
+    m_infoTableWidget->verticalHeader()->setVisible(false);
+    m_infoTableWidget->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_infoTableWidget->setSelectionMode(QAbstractItemView::NoSelection);
+    infoLayout->addWidget(m_infoTableWidget);
+    infoGroup->setLayout(infoLayout);
+    mainLayout->addWidget(infoGroup);
+
+    // --- 2. 所有波段统计信息组 ---
+    QGroupBox* allStatsGroup = new QGroupBox("所有波段统计", this);
+    QVBoxLayout* allStatsLayout = new QVBoxLayout(allStatsGroup);
+    m_allBandStatsTextEdit = new QTextEdit(this);
+    m_allBandStatsTextEdit->setReadOnly(true);
+
+    // 调整字体
+    QFont statsFont("Courier", 9); // 使用Courier字体（等宽），字号设为9
+    m_allBandStatsTextEdit->setFont(statsFont);
+    // 或者只改变字号:
+    // QFont currentFont = m_allBandStatsTextEdit->font();
+    // currentFont.setPointSize(9); // 设置一个较小的字号
+    // m_allBandStatsTextEdit->setFont(currentFont);
+
+    allStatsLayout->addWidget(m_allBandStatsTextEdit);
+    allStatsGroup->setLayout(allStatsLayout);
+    mainLayout->addWidget(allStatsGroup);
+
+    mainLayout->addStretch(); // 确保内容靠上
+
+    // (可选) 添加一个关闭按钮
+    QHBoxLayout* buttonLayout = new QHBoxLayout();
+    buttonLayout->addStretch();
+    QPushButton* closeButton = new QPushButton("关闭", this);
+    connect(closeButton, &QPushButton::clicked, this, &QDialog::accept);
+    buttonLayout->addWidget(closeButton);
+    mainLayout->addLayout(buttonLayout);
+
+    setLayout(mainLayout);
+}
+
+void RasterLayerPropertiesDialog::populateGeneralInfo()
+{
+    if (!m_rasterLayer) return;
+
+    m_infoTableWidget->setRowCount(0); // 清空旧内容
+
+    auto addInfoRow = [&](const QString& label, const QString& value) {
+        int row = m_infoTableWidget->rowCount();
+        m_infoTableWidget->insertRow(row);
+        m_infoTableWidget->setItem(row, 0, new QTableWidgetItem(label));
+        m_infoTableWidget->setItem(row, 1, new QTableWidgetItem(value));
+        };
+
+    addInfoRow("名称:", m_rasterLayer->name());
+    addInfoRow("路径:", m_rasterLayer->source());
+    addInfoRow("宽度 (列):", QString::number(m_rasterLayer->width()));
+    addInfoRow("高度 (行):", QString::number(m_rasterLayer->height()));
+    addInfoRow("波段数量:", QString::number(m_rasterLayer->bandCount()));
+
+    QgsCoordinateReferenceSystem crs = m_rasterLayer->crs();
+    if (crs.isValid()) {
+        addInfoRow("坐标参考系:", QString("%1 (%2)").arg(crs.description()).arg(crs.authid()));
+    }
+    else {
+        addInfoRow("坐标参考系:", "未知");
+    }
+
+    QgsRectangle extent = m_rasterLayer->extent();
+    if (!extent.isEmpty()) {
+        addInfoRow("范围 (XMin):", QString::number(extent.xMinimum()));
+        addInfoRow("范围 (YMin):", QString::number(extent.yMinimum()));
+        addInfoRow("范围 (XMax):", QString::number(extent.xMaximum()));
+        addInfoRow("范围 (YMax):", QString::number(extent.yMaximum()));
+    }
+    else {
+        addInfoRow("范围:", "未知");
+    }
+    m_infoTableWidget->resizeColumnsToContents();
+}
+
+void RasterLayerPropertiesDialog::populateAllBandStatistics()
+{
+    if (!m_rasterLayer) return;
+
+    m_allBandStatsTextEdit->clear();
+    QString statsTextAccumulator; // 用于累积所有波段的文本
+
+    // 获取栅格文件的完整路径
+    QString rasterFilePath = m_rasterLayer->source();
+    if (rasterFilePath.isEmpty() || !QFile::exists(rasterFilePath)) {
+        statsTextAccumulator = "错误：无法获取有效的栅格文件路径。";
+        m_allBandStatsTextEdit->setText(statsTextAccumulator);
+        return;
+    }
+
+    qDebug() << "Populating all band statistics using GDAL for:" << rasterFilePath;
+
+    // 注册所有GDAL驱动 (通常在QgsApplication::initQgis()中已完成，但再次调用无害)
+    GDALAllRegister();
+
+    // 打开栅格数据集
+    GDALDataset* poDataset = (GDALDataset*)GDALOpen(rasterFilePath.toUtf8().constData(), GA_ReadOnly);
+    if (poDataset == nullptr) {
+        statsTextAccumulator = QString("GDAL错误：无法打开栅格文件。\n%1").arg(CPLGetLastErrorMsg());
+        m_allBandStatsTextEdit->setText(statsTextAccumulator);
+        return;
+    }
+
+    int numBands = poDataset->GetRasterCount();
+    if (numBands == 0) {
+        statsTextAccumulator = "错误：栅格文件不包含任何波段。";
+        m_allBandStatsTextEdit->setText(statsTextAccumulator);
+        GDALClose(poDataset);
+        return;
+    }
+
+    // 遍历所有波段
+    for (int i = 1; i <= numBands; ++i) {
+        statsTextAccumulator += QString("--- 波段 %1 ---\n").arg(i);
+
+        GDALRasterBand* poBand = poDataset->GetRasterBand(i);
+        if (poBand == nullptr) {
+            statsTextAccumulator += QString("  错误：无法获取波段 %1 的数据。\n\n").arg(i);
+            continue; // 继续下一个波段
+        }
+
+        // 尝试获取元数据中的统计值，或进行近似计算
+        double dfMin = 0.0, dfMax = 0.0, dfMean = 0.0, dfStdDev = 0.0;
+        int bSuccessMin, bSuccessMax;
+
+        dfMin = poBand->GetMinimum(&bSuccessMin);
+        dfMax = poBand->GetMaximum(&bSuccessMax);
+
+        // 如果元数据中没有Min/Max，或者获取失败，则计算近似值
+        if (!bSuccessMin || !bSuccessMax) {
+            qDebug() << "Band" << i << ": No Min/Max in metadata, computing (approximate)...";
+            // ComputeRasterMinMax的第二个参数是输出数组，第一个是Min，第二个是Max
+            double adfMinMax[2];
+            if (poBand->ComputeRasterMinMax(TRUE, adfMinMax) == CE_None) { // TRUE for ApproxOK
+                dfMin = adfMinMax[0];
+                dfMax = adfMinMax[1];
+            }
+            else {
+                qDebug() << "GDAL ComputeRasterMinMax for band" << i << "FAILED:" << CPLGetLastErrorMsg();
+            }
+        }
+
+        // 尝试获取均值和标准差 (GetStatistics会尝试从元数据读取，如果不存在则计算)
+        // 第一个参数 bApproxOK 设为 TRUE
+        if (poBand->GetStatistics(TRUE, TRUE, &dfMin, &dfMax, &dfMean, &dfStdDev) == CE_Failure) {
+            qDebug() << "GDAL GetStatistics for band" << i << "FAILED: " << CPLGetLastErrorMsg();
+            // 作为后备，再尝试一次 ComputeStatistics (近似)
+            if (poBand->ComputeStatistics(TRUE, &dfMean, &dfStdDev, nullptr, nullptr, nullptr, nullptr) == CE_Failure) {
+                qDebug() << "GDAL ComputeStatistics (fallback) for band" << i << "FAILED: " << CPLGetLastErrorMsg();
+            }
+        }
+
+        // 获取NoData值
+        int bGotNoData;
+        double nodataValue = poBand->GetNoDataValue(&bGotNoData);
+
+        statsTextAccumulator += QString("  最小值: %1\n").arg(dfMin);
+        statsTextAccumulator += QString("  最大值: %1\n").arg(dfMax);
+        statsTextAccumulator += QString("  平均值: %1\n").arg(dfMean);
+        statsTextAccumulator += QString("  标准差: %1\n").arg(dfStdDev);
+        if (bGotNoData) {
+            statsTextAccumulator += QString("  NoData值: %1\n").arg(nodataValue);
+        }
+        statsTextAccumulator += "\n";
+    }
+
+    GDALClose(poDataset); // 关闭数据集
+    m_allBandStatsTextEdit->setText(statsTextAccumulator);
+}
+正在处理文件: ReprojectRasterDialog.cpp
+(ReprojectRasterDialog.cpp)
+#include "ReprojectRasterDialog.h"
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QGridLayout>
+#include <QLabel>
+#include <QComboBox>
+#include <QPushButton>
+#include <QLineEdit>
+#include <QFileDialog>
+#include <QMessageBox>
+#include <QStandardPaths>
+#include <QFileInfo>
+
+#include <qgsproject.h>
+#include <qgsrasterlayer.h>
+// #include <qgsprojectionselectionwidget.h> // 不再需要
+// #include <qgsprojectionselectiondialog.h> // 不再需要
+#include "Output_Manager.h"
+#include <QDebug>
+
+// GDAL
+#include "gdal_priv.h"
+#include "gdalwarper.h"
+#include "cpl_conv.h"
+#include "cpl_string.h"
+#include "ogr_spatialref.h"
+
+
+ReprojectRasterDialog::ReprojectRasterDialog(QWidget* parent)
+    : QDialog(parent),
+    // +++ 明确初始化所有指针成员为 nullptr +++
+    m_inputRasterCombo(nullptr),
+    m_btnSelectInputRasterFile(nullptr),
+    m_lblSelectedRasterInfo(nullptr),
+    m_lblCurrentCrsInfo(nullptr),
+    m_lblTargetCrs(nullptr),
+    m_targetCrsCombo(nullptr),
+    m_editOutputRasterPath(nullptr),
+    m_btnSelectOutputRaster(nullptr),
+    m_btnOk(nullptr),
+    m_btnCancel(nullptr)
+    // m_currentTargetCrs 会被默认构造
+{
+    setWindowTitle("栅格投影转换");
+    setMinimumWidth(550);
+
+    setupUI(); // 创建并布局所有UI控件
+
+    populateInputRasterComboBox();
+    populateTargetCrsComboBox();
+
+    // --- 将所有 connect 语句集中到构造函数的末尾 ---
+    // 确保此时所有UI控件都已创建完毕
+    if (m_inputRasterCombo) { // 防御性检查
+        connect(m_inputRasterCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ReprojectRasterDialog::onInputRasterChanged);
+    }
+    if (m_targetCrsCombo) { // 防御性检查
+        connect(m_targetCrsCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ReprojectRasterDialog::onTargetCrsComboChanged);
+    }
+    if (m_btnSelectInputRasterFile) { // 防御性检查
+        connect(m_btnSelectInputRasterFile, &QPushButton::clicked, this, &ReprojectRasterDialog::onSelectInputRasterClicked);
+    }
+    if (m_btnSelectOutputRaster) { // 防御性检查
+        connect(m_btnSelectOutputRaster, &QPushButton::clicked, this, &ReprojectRasterDialog::onSelectOutputRasterClicked);
+    }
+    if (m_btnOk) { // 防御性检查
+        connect(m_btnOk, &QPushButton::clicked, this, &ReprojectRasterDialog::onOkClicked);
+    }
+    if (m_btnCancel) { // 防御性检查
+        connect(m_btnCancel, &QPushButton::clicked, this, &QDialog::reject);
+    }
+}
+
+ReprojectRasterDialog::~ReprojectRasterDialog()
+{
+    // 如果有资源需要释放，可以在这里添加代码
+}
+
+void ReprojectRasterDialog::setupUI()
+{
+    // === 1. 创建布局 ===
+    QVBoxLayout* mainLayout = new QVBoxLayout(this);
+    QGridLayout* gridLayout = new QGridLayout();
+
+    // === 2. 创建所有UI控件 (严格按照先new再使用的顺序) ===
+    // 输入栅格
+    QLabel* lblInputRaster = new QLabel("输入栅格图层:", this);
+    m_inputRasterCombo = new QComboBox(this);
+    m_btnSelectInputRasterFile = new QPushButton("从文件...", this);
+    m_lblSelectedRasterInfo = new QLabel("当前选择: 无", this);
+    m_lblCurrentCrsInfo = new QLabel("源CRS: 未知", this);
+
+    // 目标CRS选择
+    m_lblTargetCrs = new QLabel("选择目标CRS:", this);
+    m_targetCrsCombo = new QComboBox(this);
+
+    // 输出栅格路径
+    QLabel* lblOutputPath = new QLabel("输出栅格路径:", this);
+    m_editOutputRasterPath = new QLineEdit(this);
+    m_editOutputRasterPath->setPlaceholderText("选择输出文件路径...");
+    m_btnSelectOutputRaster = new QPushButton("浏览...", this);
+
+    // 确定和取消按钮
+    m_btnOk = new QPushButton("确定", this);
+    m_btnCancel = new QPushButton("取消", this);
+
+    // === 3. 将控件添加到布局中 ===
+    gridLayout->addWidget(lblInputRaster, 0, 0);
+    gridLayout->addWidget(m_inputRasterCombo, 0, 1);
+    gridLayout->addWidget(m_btnSelectInputRasterFile, 0, 2);
+    gridLayout->addWidget(m_lblSelectedRasterInfo, 1, 0, 1, 3);
+    gridLayout->addWidget(m_lblCurrentCrsInfo, 2, 0, 1, 3);
+
+    gridLayout->addWidget(m_lblTargetCrs, 3, 0);
+    gridLayout->addWidget(m_targetCrsCombo, 3, 1, 1, 2);
+
+    gridLayout->addWidget(lblOutputPath, 4, 0);
+    gridLayout->addWidget(m_editOutputRasterPath, 4, 1);
+    gridLayout->addWidget(m_btnSelectOutputRaster, 4, 2);
+
+    mainLayout->addLayout(gridLayout);
+    mainLayout->addStretch();
+
+    QHBoxLayout* buttonLayout = new QHBoxLayout();
+    buttonLayout->addStretch();
+    buttonLayout->addWidget(m_btnOk);
+    buttonLayout->addWidget(m_btnCancel);
+    mainLayout->addLayout(buttonLayout);
+
+    setLayout(mainLayout);
+
+    // **注意：将connect语句移到构造函数的末尾，在所有控件创建之后**
+}
+
+void ReprojectRasterDialog::populateInputRasterComboBox()
+{
+    m_inputRasterCombo->clear();
+    m_inputRasterCombo->addItem("--- 从项目中选择栅格 ---", QVariant());
+    QList<QgsMapLayer*> layers = QgsProject::instance()->mapLayers().values();
+    for (QgsMapLayer* layer : layers) {
+            if (auto rasterLayer = qobject_cast<QgsRasterLayer*>(layer)) {
+                m_inputRasterCombo->addItem(rasterLayer->name() + QString(" (%1)").arg(rasterLayer->crs().authid().isEmpty() ? "未知CRS" : rasterLayer->crs().authid()),
+                    QVariant::fromValue(rasterLayer));
+            }
+    }
+    onInputRasterChanged(0); // 更新初始状态
+}
+
+
+// +++ 新增：填充目标CRS下拉框的函数 +++
+void ReprojectRasterDialog::populateTargetCrsComboBox()
+{
+    m_targetCrsCombo->clear();
+    // 添加一些常见的CRS
+    // 格式: 显示名称, QVariant(EPSG字符串)
+    m_targetCrsCombo->addItem("WGS 84 (EPSG:4326)", "EPSG:4326");
+    m_targetCrsCombo->addItem("Web Mercator (EPSG:3857)", "EPSG:3857");
+    m_targetCrsCombo->addItem("CGCS2000 (EPSG:4490)", "EPSG:4490");
+    m_targetCrsCombo->addItem("UTM Zone 48N (WGS84, EPSG:32648)", "EPSG:32648");
+    m_targetCrsCombo->addItem("UTM Zone 49N (WGS84, EPSG:32649)", "EPSG:32649");
+    m_targetCrsCombo->addItem("UTM Zone 50N (WGS84, EPSG:32650)", "EPSG:32650");
+    m_targetCrsCombo->addItem("UTM Zone 51N (WGS84, EPSG:32651)", "EPSG:32651");
+    // 可以根据需要添加更多
+
+    // 默认选中第一个，并更新成员变量
+    if (m_targetCrsCombo->count() > 0) {
+        onTargetCrsComboChanged(0); // 触发更新 m_currentTargetCrs 和默认输出路径
+    }
+}
+
+
+void ReprojectRasterDialog::onSelectInputRasterClicked()
+{
+    QString filePath = QFileDialog::getOpenFileName(this, "选择输入栅格文件",
+        QStandardPaths::writableLocation(QStandardPaths::HomeLocation),
+        "栅格文件 (*.tif *.tiff *.img);;所有文件 (*.*)");
+    if (!filePath.isEmpty()) {
+        m_currentInputRasterPath = filePath;
+        m_lblSelectedRasterInfo->setText(QString("当前选择: %1 (文件)").arg(QFileInfo(filePath).fileName()));
+        m_inputRasterCombo->setCurrentIndex(0);
+
+        // 尝试读取文件CRS
+        QgsRasterLayer tempLayer(filePath);
+        if (tempLayer.isValid()) {
+            QgsCoordinateReferenceSystem crs = tempLayer.crs();
+            m_lblCurrentCrsInfo->setText(QString("源CRS: %1").arg(crs.isValid() ? crs.description() : "未知/无法读取"));
+        }
+        else {
+            m_lblCurrentCrsInfo->setText("源CRS: 无法读取");
+        }
+        updateDefaultOutputPath();
+    }
+}
+
+void ReprojectRasterDialog::onInputRasterChanged(int index)
+{
+    if (index > 0) { // 从项目中选择
+        QVariant data = m_inputRasterCombo->itemData(index);
+        QgsRasterLayer* layer = qvariant_cast<QgsRasterLayer*>(data);
+        if (layer && QgsProject::instance()->mapLayer(layer->id())) {
+            m_currentInputRasterPath = layer->source();
+            m_lblSelectedRasterInfo->setText(QString("当前选择: %1 (项目)").arg(layer->name()));
+            QgsCoordinateReferenceSystem crs = layer->crs();
+            m_lblCurrentCrsInfo->setText(QString("源CRS: %1").arg(crs.isValid() ? crs.description() : "未知"));
+        }
+    }
+    else {
+        // 如果选择了 "---选择---" 但之前文件路径有值，保留文件路径的信息
+        if (m_currentInputRasterPath.isEmpty() || !m_lblSelectedRasterInfo->text().contains("(文件)")) {
+            m_currentInputRasterPath.clear();
+            m_lblSelectedRasterInfo->setText("当前选择: 无");
+            m_lblCurrentCrsInfo->setText("源CRS: 未知");
+        }
+    }
+    updateDefaultOutputPath();
+}
+
+
+// +++ 新增：当目标CRS下拉框选项改变时 +++
+void ReprojectRasterDialog::onTargetCrsComboChanged(int index)
+{
+    if (index >= 0) {
+        QString epsgString = m_targetCrsCombo->itemData(index).toString();
+        m_currentTargetCrs.createFromString(epsgString); // 更新成员变量
+        if (!m_currentTargetCrs.isValid()) {
+            qWarning() << "Failed to create target CRS from string:" << epsgString;
+        }
+    }
+    else {
+        m_currentTargetCrs = QgsCoordinateReferenceSystem(); // 设为无效
+    }
+    updateDefaultOutputPath(); // 目标CRS变了，默认输出名也可能要变
+}
+
+
+void ReprojectRasterDialog::updateDefaultOutputPath()
+{
+    if (m_currentInputRasterPath.isEmpty()) {
+        m_editOutputRasterPath->clear();
+        return;
+    }
+
+    QFileInfo fi(m_currentInputRasterPath);
+    QString baseName = fi.completeBaseName();
+    QString dirPath = fi.absolutePath();
+    QString suffix = fi.suffix();
+
+    QString crsSuffix = "reprojected";
+    if (m_currentTargetCrs.isValid() && !m_currentTargetCrs.authid().isEmpty()) {
+        crsSuffix = m_currentTargetCrs.authid().replace(":", "_");
+    }
+    else if (m_currentTargetCrs.isValid()) {
+        // 如果没有authid但有效，可以用描述的一部分（需要处理特殊字符）
+        QString desc = m_currentTargetCrs.description().simplified().replace(" ", "_").remove(QRegExp("[^a-zA-Z0-9_]"));
+        crsSuffix = desc.left(15); // 取前15个字符
+    }
+
+
+    QString defaultOutputName = QString("%1_%2.%3").arg(baseName).arg(crsSuffix).arg(suffix.isEmpty() ? "tif" : suffix);
+    m_editOutputRasterPath->setText(QDir(dirPath).filePath(defaultOutputName));
+}
+
+void ReprojectRasterDialog::onSelectOutputRasterClicked()
+{
+    // ... (与ResampleDialog中的实现类似，确保有默认后缀) ...
+    QString defaultPath = m_editOutputRasterPath->text();
+    // ... (获取并设置路径) ...
+    QString filePath = QFileDialog::getSaveFileName(this, "选择输出栅格文件路径",
+        defaultPath.isEmpty() ? QStandardPaths::writableLocation(QStandardPaths::HomeLocation) : defaultPath,
+        "GeoTIFF (*.tif *.tiff);;Erdas Imagine (*.img);;所有文件 (*.*)");
+    if (!filePath.isEmpty()) {
+        if (QFileInfo(filePath).suffix().isEmpty()) {
+            if (!filePath.endsWith(".")) filePath += ".";
+            filePath += "tif";
+        }
+        m_editOutputRasterPath->setText(filePath);
+    }
+}
+
+void ReprojectRasterDialog::onOkClicked()
+{
+    QString inputPath = m_currentInputRasterPath;
+    // === 修改：从QComboBox获取目标CRS ===
+    QgsCoordinateReferenceSystem targetCrs = m_currentTargetCrs;
+    // ==================================
+    QString outputPath = m_editOutputRasterPath->text();
+
+    // --- 参数验证 ---
+    if (inputPath.isEmpty()) { /* ... */ return; }
+    if (!targetCrs.isValid()) { QMessageBox::warning(this, "输入错误", "请选择一个有效的目标坐标参考系。"); return; }
+    if (outputPath.isEmpty()) { /* ... */ return; }
+
+    qDebug() << "Reprojecting Raster (using GDALCreateAndReprojectImage):";
+    qDebug() << "  Input:" << inputPath;
+    qDebug() << "  Target CRS AuthID:" << targetCrs.authid() << "Desc:" << targetCrs.description();
+    qDebug() << "  Output:" << outputPath;
+
+    GDALAllRegister();
+    GDALDatasetH hSrcDS = GDALOpen(inputPath.toUtf8().constData(), GA_ReadOnly);
+    if (!hSrcDS) { /* ... */ return; }
+
+    const char* pszSrcWKT = GDALGetProjectionRef(hSrcDS);
+    if (pszSrcWKT == nullptr || strlen(pszSrcWKT) == 0) { /* ...警告并返回... */ GDALClose(hSrcDS); return; }
+
+    // --- 获取目标WKT (从QgsCoordinateReferenceSystem对象) ---
+    std::string targetWktStdString = targetCrs.toWkt().toStdString();
+    // 或者 QgsCoordinateReferenceSystem::Wkt वन (更兼容旧GDAL)
+    // std::string targetWktStdString = targetCrs.toWkt().toStdString(); 
+
+    const char* pszDstWKT = targetWktStdString.c_str();
+    // ----------------------------------------------------
+
+    if (strlen(pszDstWKT) == 0) { /* ...错误并返回... */ GDALClose(hSrcDS); return; }
+    qDebug() << "Source WKT:" << pszSrcWKT;
+    qDebug() << "Target WKT:" << pszDstWKT;
+
+    GDALResampleAlg eResampleAlg = GRA_Bilinear;
+    GDALDriverH hDstDriver = GDALGetDriverByName("GTiff");
+    if (!hDstDriver) { /* ... */ GDALClose(hSrcDS); return; }
+    char** papszCreateOptions = nullptr;
+    papszCreateOptions = CSLSetNameValue(papszCreateOptions, "TILED", "YES");
+    papszCreateOptions = CSLSetNameValue(papszCreateOptions, "COMPRESS", "LZW");
+
+    GDALWarpOptions* psOptions = GDALCreateWarpOptions(); // 仍然创建它，因为 GDALCreateAndReprojectImage 会用到
+
+    CPLErr eErr = GDALCreateAndReprojectImage(
+        hSrcDS, pszSrcWKT,
+        outputPath.toUtf8().constData(), pszDstWKT,
+        hDstDriver, papszCreateOptions,
+        eResampleAlg,
+        0.0, 0.125,
+        GDALTermProgress, nullptr,
+        psOptions
+    );
+
+    CSLDestroy(papszCreateOptions);
+    GDALDestroyWarpOptions(psOptions);
+    GDALClose(hSrcDS);
+
+    if (eErr == CE_None) {
+        QMessageBox::information(this, "成功",
+            QString("栅格投影转换完成！\n输出文件已保存到:\n%1").arg(outputPath));
+        // =====================================================================
+
+        // (可选) 如果您希望转换成功后，自动将新生成的图层添加到项目中
+        // QgsRasterLayer* newLayer = new QgsRasterLayer(outputPath, QFileInfo(outputPath).baseName());
+        // if (newLayer->isValid()) {
+        //     QgsProject::instance()->addMapLayer(newLayer);
+        //     // 也可以在这里让主窗口的图层树刷新，或者缩放到新图层
+        // } else {
+        //     qWarning() << "Failed to load reprojected layer:" << outputPath << newLayer->error().message();
+        //     delete newLayer;
+        // }
+
+        accept(); // 关闭对话框
+    }
+    else { QMessageBox::critical(this, "投影转换失败", "GDAL操作失败: " + QString(CPLGetLastErrorMsg())); }
+}
+正在处理文件: ResampleDialog.cpp
+(ResampleDialog.cpp)
+// ResampleDialog.cpp
+#include "ResampleDialog.h"
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QGridLayout>
+#include <QLabel>
+#include <QComboBox>
+#include <QPushButton>
+#include <QLineEdit>
+#include <QFileDialog>
+#include <QMessageBox>
+#include <QStandardPaths>
+#include <QFileInfo>
+#include <QDoubleSpinBox>
+
+#include <qgsproject.h>
+#include <qgsrasterlayer.h>
+#include <qgsapplication.h> // For QgsApplication::messageBar() if needed
+#include "Output_Manager.h" // 用于日志输出
+#include <QDebug>
+#include <qgsunittypes.h>
+
+// GDAL for resampling (gdalwarp functionality)
+#include "gdal_priv.h"
+#include "gdalwarper.h"
+#include "cpl_conv.h"
+#include "gdal_alg.h"
+#include "cpl_string.h"
+#include "ogr_spatialref.h" // 如果涉及投影字符串
+
+ResampleDialog::ResampleDialog(QWidget* parent)
+    : QDialog(parent)
+{
+    setWindowTitle("栅格重采样");
+    setMinimumWidth(550);
+    setupUI();
+    populateInputRasterComboBox();
+    connect(m_inputRasterCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ResampleDialog::onInputLayerOrMethodChanged);
+    connect(m_resampleMethodCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ResampleDialog::onInputLayerOrMethodChanged);
+
+}
+
+ResampleDialog::~ResampleDialog()
+{
+}
+
+void ResampleDialog::setupUI()
+{
+    QVBoxLayout* mainLayout = new QVBoxLayout(this);
+    QGridLayout* gridLayout = new QGridLayout();
+
+    // 1. 输入栅格
+    gridLayout->addWidget(new QLabel("输入栅格图层:", this), 0, 0);
+    m_inputRasterCombo = new QComboBox(this);
+    gridLayout->addWidget(m_inputRasterCombo, 0, 1);
+    m_btnSelectInputRasterFile = new QPushButton("从文件...", this);
+    gridLayout->addWidget(m_btnSelectInputRasterFile, 0, 2);
+    m_lblSelectedRasterInfo = new QLabel("当前选择: 无", this);
+    gridLayout->addWidget(m_lblSelectedRasterInfo, 1, 0, 1, 3);
+
+    // 2. 重采样方法
+    gridLayout->addWidget(new QLabel("重采样方法:", this), 2, 0);
+    m_resampleMethodCombo = new QComboBox(this);
+    m_resampleMethodCombo->addItem("最近邻 (Nearest Neighbour)", static_cast<int>(GRA_NearestNeighbour));
+    m_resampleMethodCombo->addItem("双线性插值 (Bilinear)", static_cast<int>(GRA_Bilinear));
+    m_resampleMethodCombo->addItem("立方卷积 (Cubic Convolution)", static_cast<int>(GRA_Cubic));
+    // m_resampleMethodCombo->addItem("三次样条 (Cubic Spline)", static_cast<int>(GRA_CubicSpline));
+    // m_resampleMethodCombo->addItem("Lanczos", static_cast<int>(GRA_Lanczos));
+    gridLayout->addWidget(m_resampleMethodCombo, 2, 1, 1, 2);
+
+    // 3. 输出像元大小 (可选)
+    gridLayout->addWidget(new QLabel("输出像元大小 X:", this), 3, 0);
+    m_spinOutputPixelSizeX = new QDoubleSpinBox(this);
+    m_spinOutputPixelSizeX->setDecimals(6); // 允许更高精度
+    m_spinOutputPixelSizeX->setMinimum(0);  // 0 表示使用源分辨率
+    m_spinOutputPixelSizeX->setSuffix(" (地图单位)");
+    m_spinOutputPixelSizeX->setSpecialValueText("使用源分辨率"); // 当值为0时显示
+    gridLayout->addWidget(m_spinOutputPixelSizeX, 3, 1);
+
+    gridLayout->addWidget(new QLabel("输出像元大小 Y:", this), 4, 0);
+    m_spinOutputPixelSizeY = new QDoubleSpinBox(this);
+    m_spinOutputPixelSizeY->setDecimals(6);
+    m_spinOutputPixelSizeY->setMinimum(0);
+    m_spinOutputPixelSizeY->setSuffix(" (地图单位)");
+    m_spinOutputPixelSizeY->setSpecialValueText("使用源分辨率");
+    gridLayout->addWidget(m_spinOutputPixelSizeY, 4, 1);
+
+    m_lblPixelSizeHint = new QLabel("提示: X和Y都设为0或留空，则保持原始分辨率。", this);
+    m_lblPixelSizeHint->setStyleSheet("font-style: italic; color: gray;");
+    gridLayout->addWidget(m_lblPixelSizeHint, 5, 0, 1, 3);
+
+
+    // 4. 输出栅格路径
+    gridLayout->addWidget(new QLabel("输出栅格路径:", this), 6, 0);
+    m_editOutputRasterPath = new QLineEdit(this);
+    m_editOutputRasterPath->setPlaceholderText("选择输出文件路径...");
+    gridLayout->addWidget(m_editOutputRasterPath, 6, 1);
+    m_btnSelectOutputRaster = new QPushButton("浏览...", this);
+    gridLayout->addWidget(m_btnSelectOutputRaster, 6, 2);
+
+    mainLayout->addLayout(gridLayout);
+    mainLayout->addStretch();
+
+    // 5. 按钮
+    QHBoxLayout* buttonLayout = new QHBoxLayout();
+    buttonLayout->addStretch();
+    m_btnOk = new QPushButton("确定", this);
+    m_btnCancel = new QPushButton("取消", this);
+    buttonLayout->addWidget(m_btnOk);
+    buttonLayout->addWidget(m_btnCancel);
+    mainLayout->addLayout(buttonLayout);
+
+    setLayout(mainLayout);
+
+    // 连接信号
+    connect(m_inputRasterCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
+        QString unitSuffix = " (未知单位)";
+        if (index > 0) {
+            QVariant data = m_inputRasterCombo->itemData(index);
+            QgsRasterLayer* layer = qvariant_cast<QgsRasterLayer*>(data);
+            if (layer && QgsProject::instance()->mapLayer(layer->id())) {
+                m_currentInputRasterPath = layer->source();
+                m_lblSelectedRasterInfo->setText(QString("当前选择: %1 (项目)").arg(layer->name()));
+                if (layer->crs().isGeographic()) {
+                    unitSuffix = " (度)";
+                }
+                else {
+                    unitSuffix = QString(" (%1)").arg(QgsUnitTypes::toString(layer->crs().mapUnits()));
+                }
+            }
+        }
+        else {
+            if (m_currentInputRasterPath.isEmpty() || !m_lblSelectedRasterInfo->text().contains("(文件)")) {
+                // ... (之前的逻辑)
+            }
+            else { // 如果是从文件选择的路径
+                QgsRasterLayer tempLayer(m_currentInputRasterPath);
+                if (tempLayer.isValid() && tempLayer.crs().isValid()) {
+                    if (tempLayer.crs().isGeographic()) {
+                        unitSuffix = " (度)";
+                    }
+                    else {
+                        unitSuffix = QString(" (%1)").arg(QgsUnitTypes::toString(tempLayer.crs().mapUnits()));
+                    }
+                }
+            }
+        }
+        m_spinOutputPixelSizeX->setSuffix(unitSuffix);
+        m_spinOutputPixelSizeY->setSuffix(unitSuffix);
+        updateDefaultOutputPath();
+        });
+    connect(m_btnSelectInputRasterFile, &QPushButton::clicked, this, &ResampleDialog::onSelectInputRasterClicked);
+    connect(m_resampleMethodCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &ResampleDialog::onInputLayerOrMethodChanged);
+    connect(m_btnSelectOutputRaster, &QPushButton::clicked, this, &ResampleDialog::onSelectOutputRasterClicked);
+    connect(m_btnOk, &QPushButton::clicked, this, &ResampleDialog::onOkClicked);
+    connect(m_btnCancel, &QPushButton::clicked, this, &QDialog::reject);
+}
+
+void ResampleDialog::populateInputRasterComboBox()
+{
+    m_inputRasterCombo->clear();
+    m_inputRasterCombo->addItem("--- 从项目中选择栅格 ---", QVariant());
+    QList<QgsMapLayer*> layers = QgsProject::instance()->mapLayers().values();
+    for (QgsMapLayer* layer : layers) {
+            if (auto rasterLayer = qobject_cast<QgsRasterLayer*>(layer)) {
+                m_inputRasterCombo->addItem(rasterLayer->name(), QVariant::fromValue(rasterLayer));
+            }
+    }
+}
+
+void ResampleDialog::onSelectInputRasterClicked()
+{
+    QString filePath = QFileDialog::getOpenFileName(this, "选择输入栅格文件",
+        QStandardPaths::writableLocation(QStandardPaths::HomeLocation),
+        "栅格文件 (*.tif *.tiff *.img);;所有文件 (*.*)");
+    if (!filePath.isEmpty()) {
+        m_currentInputRasterPath = filePath;
+        m_lblSelectedRasterInfo->setText(QString("当前选择: %1 (文件)").arg(QFileInfo(filePath).fileName()));
+        m_inputRasterCombo->setCurrentIndex(0); // 清除下拉框选择
+        updateDefaultOutputPath();
+    }
+}
+
+void ResampleDialog::onInputLayerOrMethodChanged()
+{
+    updateDefaultOutputPath();
+}
+
+void ResampleDialog::updateDefaultOutputPath()
+{
+    if (m_currentInputRasterPath.isEmpty()) {
+        m_editOutputRasterPath->clear();
+        return;
+    }
+
+    QFileInfo fi(m_currentInputRasterPath);
+    QString baseName = fi.completeBaseName();
+    QString dirPath = fi.absolutePath();
+    QString suffix = fi.suffix(); // 保留原始后缀
+
+    QString methodSuffix;
+    GDALResampleAlg alg = static_cast<GDALResampleAlg>(m_resampleMethodCombo->currentData().toInt());
+    switch (alg) {
+    case GRA_NearestNeighbour: methodSuffix = "nn"; break;
+    case GRA_Bilinear:         methodSuffix = "bilinear"; break;
+    case GRA_Cubic:            methodSuffix = "cubic"; break;
+        // case GRA_CubicSpline:      methodSuffix = "cubicspline"; break;
+        // case GRA_Lanczos:          methodSuffix = "lanczos"; break;
+    default:                   methodSuffix = "res"; break;
+    }
+
+    QString defaultOutputName = QString("%1_resampled_%2.%3").arg(baseName).arg(methodSuffix).arg(suffix);
+    m_editOutputRasterPath->setText(QDir(dirPath).filePath(defaultOutputName));
+}
+
+
+void ResampleDialog::onSelectOutputRasterClicked()
+{
+    QString defaultPath = m_editOutputRasterPath->text();
+    if (defaultPath.isEmpty() && !m_currentInputRasterPath.isEmpty()) {
+        // 尝试基于输入路径生成一个默认的保存路径
+        QFileInfo fi(m_currentInputRasterPath);
+        defaultPath = fi.absolutePath();
+    }
+    else if (defaultPath.isEmpty()) {
+        defaultPath = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+    }
+
+    QString filePath = QFileDialog::getSaveFileName(this, "选择输出栅格文件路径",
+        defaultPath,
+        "GeoTIFF (*.tif *.tiff);;Erdas Imagine (*.img);;所有文件 (*.*)");
+    if (!filePath.isEmpty()) {
+        // 确保有后缀
+        if (QFileInfo(filePath).suffix().isEmpty()) {
+            if (!filePath.endsWith(".")) filePath += ".";
+            filePath += "tif"; // 默认tif
+        }
+        m_editOutputRasterPath->setText(filePath);
+    }
+}
+
+// 公共接口实现
+QString ResampleDialog::selectedInputRasterPath() const {
+    return m_currentInputRasterPath;
+}
+
+Qgis::RasterResamplingMethod ResampleDialog::selectedResamplingMethod() const {
+    // GDALResampleAlg 与 Qgis::RasterResamplingMethod 的值是对应的
+    return static_cast<Qgis::RasterResamplingMethod>(m_resampleMethodCombo->currentData().toInt());
+}
+
+QString ResampleDialog::outputRasterPath() const {
+    return m_editOutputRasterPath->text();
+}
+
+double ResampleDialog::outputPixelSizeX() const {
+    double val = m_spinOutputPixelSizeX->value();
+    return (val <= 0) ? -1.0 : val; // 0或负数表示使用源分辨率
+}
+double ResampleDialog::outputPixelSizeY() const {
+    double val = m_spinOutputPixelSizeY->value();
+    return (val <= 0) ? -1.0 : val;
+}
+
+
+// ResampleDialog.cpp
+
+void ResampleDialog::onOkClicked()
+{
+    // --- 步骤 0: 获取所有输入参数 ---
+    QString inputPath = selectedInputRasterPath();
+    GDALResampleAlg resampleAlg = static_cast<GDALResampleAlg>(m_resampleMethodCombo->currentData().toInt());
+    QString outputPath = outputRasterPath();
+    double targetPixelSizeX = outputPixelSizeX(); // -1.0 或 0.0 表示使用源分辨率
+    double targetPixelSizeY = outputPixelSizeY(); // -1.0 或 0.0 表示使用源分辨率
+
+    // --- 参数检查 ---
+    if (inputPath.isEmpty()) { QMessageBox::warning(this, "输入错误", "请选择输入栅格图层。"); return; }
+    if (outputPath.isEmpty()) { QMessageBox::warning(this, "输入错误", "请输入输出栅格路径。"); return; }
+
+    qDebug() << "\n====== 开始重采样操作 (直接WarpOperation) ======";
+    qDebug() << "GDAL版本:" << GDALVersionInfo("RELEASE_NAME");
+    qDebug() << "输入文件:" << inputPath;
+    qDebug() << "输出文件:" << outputPath;
+    qDebug() << "重采样算法 (int):" << static_cast<int>(resampleAlg);
+    qDebug() << "目标像元大小 X:" << targetPixelSizeX << " Y:" << targetPixelSizeY;
+
+    GDALAllRegister();
+
+    // --- 步骤 1: 打开输入数据集 ---
+    GDALDatasetH hSrcDS = GDALOpen(inputPath.toUtf8().constData(), GA_ReadOnly);
+    if (!hSrcDS) {
+        QMessageBox::critical(this, "GDAL错误", "无法打开输入栅格: " + inputPath + "\n" + CPLGetLastErrorMsg());
+        return;
+    }
+
+    // --- 步骤 2: 获取输入参数，计算输出几何参数 ---
+    const int srcWidth = GDALGetRasterXSize(hSrcDS);
+    const int srcHeight = GDALGetRasterYSize(hSrcDS);
+    const int bandCount = GDALGetRasterCount(hSrcDS);
+    if (bandCount == 0) {
+        QMessageBox::critical(this, "GDAL错误", "输入栅格不包含任何波段。");
+        GDALClose(hSrcDS);
+        return;
+    }
+    const GDALDataType dataType = GDALGetRasterDataType(GDALGetRasterBand(hSrcDS, 1));
+    double adfSrcGeoTransform[6];
+    if (GDALGetGeoTransform(hSrcDS, adfSrcGeoTransform) != CE_None) {
+        QMessageBox::critical(this, "GDAL错误", "无法获取输入栅格的地理变换参数。");
+        GDALClose(hSrcDS);
+        return;
+    }
+    const char* pszSrcProjection = GDALGetProjectionRef(hSrcDS);
+
+    int dstWidth = srcWidth;
+    int dstHeight = srcHeight;
+    double adfDstGeoTransform[6];
+    memcpy(adfDstGeoTransform, adfSrcGeoTransform, sizeof(double) * 6); // 初始化目标地理变换
+
+    // 用户指定了目标分辨率
+    if (targetPixelSizeX > 0 && targetPixelSizeY > 0) {
+        double dfSrcXMin = adfSrcGeoTransform[0];
+        double dfSrcYMax = adfSrcGeoTransform[3];
+        double dfSrcXMax = dfSrcXMin + adfSrcGeoTransform[1] * srcWidth;
+        double dfSrcYMin = dfSrcYMax + adfSrcGeoTransform[5] * srcHeight;
+
+        qDebug() << "  源X范围:" << dfSrcXMin << "to" << dfSrcXMax << "(宽度:" << (dfSrcXMax - dfSrcXMin) << ")";
+        qDebug() << "  源Y范围:" << dfSrcYMin << "to" << dfSrcYMax << "(高度:" << (dfSrcYMax - dfSrcYMin) << ")";
+        qDebug() << "  目标像元X:" << targetPixelSizeX << "目标像元Y:" << targetPixelSizeY;
+
+        // 确保除数不为0，并且是有意义的正值
+        if (targetPixelSizeX <= 0 || targetPixelSizeY <= 0) {
+            QMessageBox::critical(this, "参数错误", "目标像元大小必须为正数。");
+            GDALClose(hSrcDS);
+            return;
+        }
+
+        double extentWidth = std::abs(dfSrcXMax - dfSrcXMin);
+        double extentHeight = std::abs(dfSrcYMax - dfSrcYMin);
+
+        // 如果源数据的地理范围本身非常小（例如，接近0），则不应进行基于分辨率的尺寸计算
+        if (extentWidth < 1e-9 || extentHeight < 1e-9) { // 1e-9 是一个很小的阈值
+            qWarning() << "源数据地理范围过小，无法根据目标分辨率计算尺寸。将使用源尺寸。";
+            // 保持 dstWidth = srcWidth, dstHeight = srcHeight
+        }
+        else {
+            dstWidth = static_cast<int>(extentWidth / targetPixelSizeX + 0.5);
+            dstHeight = static_cast<int>(extentHeight / std::abs(targetPixelSizeY) + 0.5); // Y像元大小通常用绝对值
+        }
+
+        // 保持原始栅格左上角坐标和像元大小符号
+        adfDstGeoTransform[0] = adfSrcGeoTransform[0];
+        adfDstGeoTransform[1] = targetPixelSizeX;
+        adfDstGeoTransform[2] = adfSrcGeoTransform[2]; // 保留旋转参数
+        adfDstGeoTransform[3] = adfSrcGeoTransform[3];
+        adfDstGeoTransform[4] = adfSrcGeoTransform[4]; // 保留旋转参数
+        adfDstGeoTransform[5] = (adfSrcGeoTransform[5] < 0) ? -std::abs(targetPixelSizeY) : std::abs(targetPixelSizeY);
+    }
+
+    qDebug() << "计算出的目标尺寸:" << dstWidth << "x" << dstHeight;
+    if (dstWidth <= 0 || dstHeight <= 0) {
+        QMessageBox::critical(this, "参数错误",
+            QString("计算出的目标栅格尺寸为 %1x%2，这是一个无效尺寸。\n\n"
+                "这通常意味着您设定的“目标像元大小”相对于源栅格的地理范围过大。\n\n"
+                "源栅格宽度（地理单位）: %3\n"
+                "源栅格高度（地理单位）: %4\n"
+                "您设定的目标像元大小 X: %5, Y: %6 (单位与源栅格一致)")
+            .arg(dstWidth).arg(dstHeight)
+            .arg(std::abs(adfSrcGeoTransform[1] * srcWidth)) // 源地理宽度
+            .arg(std::abs(adfSrcGeoTransform[5] * srcHeight)) // 源地理高度
+            .arg(targetPixelSizeX).arg(targetPixelSizeY)
+        );
+        GDALClose(hSrcDS);
+        return;
+    }
+
+    // --- 步骤 3: 创建输出数据集 ---
+    GDALDriverH hDriver = GDALGetDriverByName("GTiff");
+    if (!hDriver) {
+        QMessageBox::critical(this, "GDAL错误", "无法获取GTiff驱动。");
+        GDALClose(hSrcDS);
+        return;
+    }
+    char** papszCreateOptions = nullptr;
+    papszCreateOptions = CSLSetNameValue(papszCreateOptions, "TILED", "YES");
+    papszCreateOptions = CSLSetNameValue(papszCreateOptions, "COMPRESS", "LZW");
+
+    GDALDatasetH hDstDS = GDALCreate(hDriver, outputPath.toUtf8().constData(),
+        dstWidth, dstHeight, bandCount, dataType, papszCreateOptions);
+    CSLDestroy(papszCreateOptions);
+
+    if (!hDstDS) {
+        QMessageBox::critical(this, "GDAL错误", "无法创建输出文件: " + outputPath + "\n" + CPLGetLastErrorMsg());
+        GDALClose(hSrcDS);
+        return;
+    }
+
+    // 设置输出数据集的地理转换和投影
+    GDALSetGeoTransform(hDstDS, adfDstGeoTransform);
+    if (pszSrcProjection != nullptr && strlen(pszSrcProjection) > 0) {
+        GDALSetProjection(hDstDS, pszSrcProjection);
+    }
+    qDebug() << "输出数据集已创建。";
+
+    // --- 步骤 4: 配置并执行 GDALWarpOperation ---
+    GDALWarpOptions* psWarpOptions = GDALCreateWarpOptions();
+    psWarpOptions->eResampleAlg = resampleAlg;
+
+    // 关键：将源和已创建的目标数据集都提供给WarpOptions
+    psWarpOptions->hSrcDS = hSrcDS;
+    psWarpOptions->hDstDS = hDstDS;
+
+    psWarpOptions->nBandCount = bandCount;
+    psWarpOptions->panSrcBands = (int*)CPLMalloc(sizeof(int) * bandCount);
+    psWarpOptions->panDstBands = (int*)CPLMalloc(sizeof(int) * bandCount);
+    for (int i = 0; i < bandCount; i++) {
+        psWarpOptions->panSrcBands[i] = i + 1;
+        psWarpOptions->panDstBands[i] = i + 1;
+    }
+
+    // 创建转换器，此时源和目标数据集的投影和地理变换都已确定
+    // 如果源和目标投影不同，GDALCreateGenImgProjTransformer2会处理重投影
+    // 如果相同，它主要处理地理变换之间的映射
+    psWarpOptions->pTransformerArg = GDALCreateGenImgProjTransformer2(hSrcDS, hDstDS, nullptr); // 第三个参数可传NULL或创建选项
+    psWarpOptions->pfnTransformer = GDALGenImgProjTransform;
+
+    if (!psWarpOptions->pTransformerArg) {
+        QMessageBox::critical(this, "GDAL错误", "创建坐标转换器失败:\n" + QString(CPLGetLastErrorMsg()));
+        CPLFree(psWarpOptions->panSrcBands); CPLFree(psWarpOptions->panDstBands);
+        GDALDestroyWarpOptions(psWarpOptions);
+        GDALClose(hDstDS); GDALClose(hSrcDS);
+        return;
+    }
+    qDebug() << "WarpOptions配置完毕，转换器已创建。";
+
+    GDALWarpOperation oWarper;
+    CPLErr eErr = oWarper.Initialize(psWarpOptions);
+
+    if (eErr == CE_None) {
+        qDebug() << "WarpOperation初始化成功，开始ChunkAndWarpImage...";
+        // 目标尺寸从hDstDS获取
+        eErr = oWarper.ChunkAndWarpImage(0, 0, GDALGetRasterXSize(hDstDS), GDALGetRasterYSize(hDstDS));
+        if (eErr != CE_None) {
+            QMessageBox::critical(this, "重采样失败", "GDAL ChunkAndWarpImage 操作失败: " + QString(CPLGetLastErrorMsg()));
+        }
+    }
+    else {
+        QMessageBox::critical(this, "GDAL错误", "初始化Warp操作失败: " + QString(CPLGetLastErrorMsg()));
+    }
+
+    // --- 步骤 5: 清理资源 ---
+    if (psWarpOptions != nullptr) {
+        if (psWarpOptions->pTransformerArg != nullptr) {
+            GDALDestroyTransformer(psWarpOptions->pTransformerArg);
+            psWarpOptions->pTransformerArg = nullptr;
+        }
+        CPLFree(psWarpOptions->panSrcBands); psWarpOptions->panSrcBands = nullptr;
+        CPLFree(psWarpOptions->panDstBands); psWarpOptions->panDstBands = nullptr;
+        // papszWarpOptions 在这个版本中未使用，所以不需要CSLDestroy
+        GDALDestroyWarpOptions(psWarpOptions); psWarpOptions = nullptr;
+    }
+
+    if (hDstDS != nullptr) {
+        GDALClose(hDstDS); // 确保先关闭目标数据集，数据才会完全写入
+        hDstDS = nullptr;
+    }
+    if (hSrcDS != nullptr) {
+        GDALClose(hSrcDS);
+        hSrcDS = nullptr;
+    }
+
+    // --- 步骤 6: 结果反馈 ---
+    if (eErr == CE_None) {
+        QMessageBox::information(this, "成功", "栅格重采样完成！\n输出文件: " + outputPath);
+        accept();
+    }
+}
+正在处理文件: AnalysisToolboxWidget.h
+(AnalysisToolboxWidget.h)
+// AnalysisToolboxWidget.h
+#ifndef ANALYSISTOOLBOXWIDGET_H
+#define ANALYSISTOOLBOXWIDGET_H
+
+#include <QWidget>
+#include <QStandardItemModel> // 我们用QStandardItemModel来构建树
+
+// 前向声明
+class QTreeView;
+class QStandardItem;
+class QModelIndex;
+
+// 定义一个枚举或常量来唯一标识每个工具
+enum class AnalysisToolId {
+    SpatialJoin,
+    Buffer,
+    RasterStats,
+    RasterClip,
+    RasterResample,
+    RasterReproject,
+    ZonalStats
+    // ... 可以继续添加
+};
+// 将工具ID存储在QStandardItem的UserRole中
+const int ToolIdRole = Qt::UserRole + 1;
+
+
+class AnalysisToolboxWidget : public QWidget
+{
+    Q_OBJECT
+
+public:
+    explicit AnalysisToolboxWidget(QWidget* parent = nullptr);
+    ~AnalysisToolboxWidget();
+
+private slots:
+    // 当用户双击树中的项时调用
+    void onItemDoubleClicked(const QModelIndex& index);
+
+private:
+    void setupUI();
+    void populateToolTree(); // 填充工具树的内容
+
+    QTreeView* m_toolTreeView;
+    QStandardItemModel* m_toolModel;
+};
+
+#endif // ANALYSISTOOLBOXWIDGET_H
+正在处理文件: AttributeTableDialog.h
+(AttributeTableDialog.h)
+#include <QDialog>
+#include <QItemSelectionModel> // +++ 新增，用于获取选中行
+
+// 前向声明
+class QgsVectorLayer;
+class QgsMapCanvas;
+class QTableView;
+class QgsAttributeTableModel;
+class QgsAttributeTableFilterModel;
+class QComboBox;
+class QRadioButton;
+class QPushButton;
+class QLineEdit;
+
+class AttributeTableDialog : public QDialog
+{
+    Q_OBJECT
+
+public:
+    explicit AttributeTableDialog(QgsVectorLayer* layer, QgsMapCanvas* canvas, QWidget* parent = nullptr);
+    ~AttributeTableDialog();
+
+private slots:
+    // +++ 新增的槽函数 +++
+    void onFieldSelectionChanged(int index);
+    void onSortOrderToggle();
+    void onSearchButtonClicked();
+    void onFilterModeChanged(); // 响应排序/搜索模式的切换
+
+    // +++ 新增槽函数 +++
+    void onDeleteSelectedFeatures();
+
+    void synchronizeTableSelectionWithLayer();
+
+    void onInvertSelection();
+
+private:
+    void setupUI();
+    void populateFieldsComboBox();
+    void updateControlsState(); // 一个用于更新控件启用/禁用状态的辅助函数
+
+    // UI 控件
+    QTableView* m_tableView;
+    QComboBox* m_fieldComboBox;
+    QRadioButton* m_sortRadioButton;
+    QRadioButton* m_searchRadioButton;
+    QPushButton* m_sortOrderButton;
+    QLineEdit* m_searchLineEdit;
+    QPushButton* m_searchButton;
+    QPushButton* m_deleteButton; // +++ 新增删除按钮 +++
+    QPushButton* m_invertSelectionButton; // +++ 新增反选按钮 +++
+
+    // 数据模型
+    QgsVectorLayer* m_layer;
+    QgsMapCanvas* m_canvas;
+    QgsAttributeTableModel* m_tableModel;
+    QgsAttributeTableFilterModel* m_filterModel;
+
+    // 状态变量
+    Qt::SortOrder m_currentSortOrder;
+
+    // +++ 新增状态变量，用于控制删除提示只显示一次 +++
+    bool m_deleteWarningShown;
+};
 正在处理文件: CustomLayerTreeView.h
 (CustomLayerTreeView.h)
 #include <QWidget>
@@ -1630,6 +3558,10 @@ private slots:
     // -- !! 新增的私有槽函数，用于处理排序 !! --
     void onMoveLayerUp(const QModelIndex& index);
     void onMoveLayerDown(const QModelIndex& index);
+
+    // 置于顶层/底层
+    void onMoveToTop(const QModelIndex& index);
+    void onMoveToBottom(const QModelIndex& index);
 
 
 private:
@@ -1928,5 +3860,161 @@ private:
     bool resolveLayerCrs(QgsMapLayer* layer);
     QPushButton* m_crsButton;
     QgsMapLayer* m_currentLayer;
+};
+
+正在处理文件: RasterLayerPropertiesDialog.h
+(RasterLayerPropertiesDialog.h)
+#include <QDialog>
+
+// 前向声明
+class QgsRasterLayer;
+class QLabel;
+class QTableWidget; // 我们仍然用表格来美观地显示信息
+class QTextEdit;    // 用于显示多波段统计
+
+class RasterLayerPropertiesDialog : public QDialog
+{
+    Q_OBJECT
+
+public:
+    explicit RasterLayerPropertiesDialog(QgsRasterLayer* layer, QWidget* parent = nullptr);
+    ~RasterLayerPropertiesDialog();
+
+private:
+    void setupUI();
+    void populateGeneralInfo();
+    void populateAllBandStatistics(); // 新函数：填充所有波段的统计
+
+    QgsRasterLayer* m_rasterLayer;
+
+    // UI - 基本信息区
+    QTableWidget* m_infoTableWidget;
+
+    // UI - 多波段统计区
+    QLabel* m_lblBandStatsTitle;
+    QTextEdit* m_allBandStatsTextEdit; // 用一个简单的文本框显示所有波段统计
+};
+
+正在处理文件: ReprojectRasterDialog.h
+(ReprojectRasterDialog.h)
+// ReprojectRasterDialog.h
+#ifndef REPROJECTRASTERDIALOG_H
+#define REPROJECTRASTERDIALOG_H
+
+#include <QDialog>
+#include <qgscoordinatereferencesystem.h> // 包含QgsCoordinateReferenceSystem
+
+// 前向声明
+class QComboBox;
+class QPushButton;
+class QLineEdit;
+class QLabel;
+class QgsRasterLayer;
+
+class ReprojectRasterDialog : public QDialog
+{
+    Q_OBJECT
+
+public:
+    explicit ReprojectRasterDialog(QWidget* parent = nullptr);
+    ~ReprojectRasterDialog();
+
+private slots:
+    void onSelectInputRasterClicked();
+    void onSelectOutputRasterClicked();
+    void onInputRasterChanged(int index);
+    void onTargetCrsComboChanged(int index); // 当目标CRS下拉框改变时
+    void onOkClicked();
+
+private:
+    void setupUI();
+    void populateInputRasterComboBox();
+    void populateTargetCrsComboBox(); // 新函数：填充目标CRS下拉框
+    void updateDefaultOutputPath();
+
+    // UI 控件
+    QComboBox* m_inputRasterCombo;
+    QPushButton* m_btnSelectInputRasterFile;
+    QLabel* m_lblSelectedRasterInfo;
+    QLabel* m_lblCurrentCrsInfo;
+
+    // === 修改：使用QComboBox替代QgsProjectionSelectionWidget ===
+    QLabel* m_lblTargetCrs;
+    QComboBox* m_targetCrsCombo;
+    // =======================================================
+
+    QLineEdit* m_editOutputRasterPath;
+    QPushButton* m_btnSelectOutputRaster;
+
+    QPushButton* m_btnOk;
+    QPushButton* m_btnCancel;
+
+    // 数据
+    QString m_currentInputRasterPath;
+    QgsCoordinateReferenceSystem m_currentTargetCrs; // 存储当前选中的目标CRS
+};
+
+#endif // REPROJECTRASTERDIALOG_H
+正在处理文件: ResampleDialog.h
+(ResampleDialog.h)
+#include <QDialog>
+#include <qgis.h> // For Qgis::ResamplingMethod
+
+// 前向声明
+class QComboBox;
+class QPushButton;
+class QLineEdit;
+class QLabel;
+class QgsRasterLayer;
+class QDoubleSpinBox;
+
+class ResampleDialog : public QDialog
+{
+    Q_OBJECT
+
+public:
+    explicit ResampleDialog(QWidget* parent = nullptr);
+    ~ResampleDialog();
+
+    // 公共接口获取参数
+    QString selectedInputRasterPath() const; // 返回输入栅格的路径
+    Qgis::RasterResamplingMethod selectedResamplingMethod() const;
+    QString outputRasterPath() const;
+    double outputPixelSizeX() const; // -1 表示使用源分辨率
+    double outputPixelSizeY() const; // -1 表示使用源分辨率
+
+private slots:
+    void onSelectInputRasterClicked();
+    void onSelectOutputRasterClicked();
+    void onInputLayerOrMethodChanged(); // 当输入图层或方法改变时，更新默认输出名
+    void onOkClicked();
+
+private:
+    void setupUI();
+    void populateInputRasterComboBox();
+    void updateDefaultOutputPath();
+
+    // UI 控件
+    QComboBox* m_inputRasterCombo;
+    QPushButton* m_btnSelectInputRasterFile;
+    QLabel* m_lblSelectedRasterInfo;
+
+    QComboBox* m_resampleMethodCombo;
+
+    QLabel* m_lblOutputPixelSizeX;
+    QDoubleSpinBox* m_spinOutputPixelSizeX;
+    QLabel* m_lblOutputPixelSizeY;
+    QDoubleSpinBox* m_spinOutputPixelSizeY;
+    QLabel* m_lblPixelSizeHint; // 提示用户留空则使用源分辨率
+
+
+    QLineEdit* m_editOutputRasterPath;
+    QPushButton* m_btnSelectOutputRaster;
+
+    QPushButton* m_btnOk;
+    QPushButton* m_btnCancel;
+
+    // 数据
+    QString m_currentInputRasterPath; // 存储当前选择的输入栅格路径
 };
 
