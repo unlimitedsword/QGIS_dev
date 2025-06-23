@@ -5,6 +5,7 @@
 #include <QTextCodec>
 #include <QDir>
 #include <QDateTime>
+#include <QStyleFactory>
 #include <qgsapplication.h>
 #include <qgscoordinatereferencesystem.h>
 #include <qgsproviderregistry.h>
@@ -13,12 +14,6 @@
 #include <QMessageBox>
 #include <QMetaType>
 
-// 一个简单的函数，用于在屏幕上显示诊断信息
-void showDiagnosis(const QString& title, const QString& message) {
-    qDebug() << "---" << title << "---";
-    qDebug() << message;
-    QMessageBox::information(nullptr, title, message);
-}
 
 int main(int argc, char* argv[])
 {
@@ -38,7 +33,6 @@ int main(int argc, char* argv[])
     // 使用 Qt 的 qputenv，它更安全
     // 它在内部处理了字符串的生命周期问题
     qputenv("PROJ_LIB", QDir::toNativeSeparators(prefixPath + "/share/proj").toLocal8Bit());
-    qputenv("GDAL_DATA", QDir::toNativeSeparators(prefixPath + "/share/gdal").toLocal8Bit());
     qputenv("QT_PLUGIN_PATH", QDir::toNativeSeparators(prefixPath + "/plugins").toLocal8Bit());
 
     // 添加核心DLL目录到PATH，以防万一
@@ -65,16 +59,34 @@ int main(int argc, char* argv[])
     // === STAGE 5: 启动主程序 ===
     qDebug() << "All checks passed. Starting main application...";
 
+
+    // ====================== 应用预设样式(qss) ======================
+    // 1. 查看可用的样式 (可选，用于调试)
+    qDebug() << "Available Qt styles:" << QStyleFactory::keys();
+
+    // 2. 设置一个您喜欢的样式
+    //    "Fusion" 通常是一个好的、跨平台的选择。
+    //    您可以尝试 "Windows" (在Windows上) 或其他可用的样式。
+    QString styleName = "Fusion";
+    if (QStyleFactory::keys().contains(styleName, Qt::CaseInsensitive)) {
+        a.setStyle(QStyleFactory::create(styleName));
+        OutputManager::instance()->logMessage(QString("Application style set to: %1").arg(styleName));
+    }
+    else {
+        OutputManager::instance()->logWarning(QString("Style '%1' not found. Using default application style.").arg(styleName));
+        qDebug() << "Default style will be used. Available styles:" << QStyleFactory::keys();
+    }
+
+
     int result = 0;
     {
         QGIS_dev w;
         w.setMinimumSize(1920, 1080);
         w.show();
 
-        // 日志系统现在可以安全初始化并使用了
+        // 日志系统安全初始化并使用
         QDir logDir(QApplication::applicationDirPath());
-        logDir.cdUp(); 
-        logDir.cdUp();
+
         logDir.mkdir("logs");
         if (logDir.exists("logs")) {
             logDir.cd("logs");

@@ -18,8 +18,6 @@ OutputWidget::OutputWidget(QWidget* parent)
     layout->addWidget(m_outputConsole);
     setLayout(layout);
 
-    QString testMessage = "This is a test message!";
-    m_outputConsole->append(testMessage);
     connect(OutputManager::instance(), &OutputManager::messageLogged, this, &OutputWidget::displayMessage);
 }
 

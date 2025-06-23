@@ -26,7 +26,7 @@
   </ImportGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'" Label="QtSettings">
     <QtInstall>5.15.2_msvc2019_64</QtInstall>
-    <QtModules>core;gui;widgets;xml</QtModules>
+    <QtModules>core;xml;gui;widgets</QtModules>
     <QtBuildConfig>release</QtBuildConfig>
   </PropertyGroup>
   <Target Name="QtMsBuildNotFound" BeforeTargets="CustomBuild;ClCompile" Condition="!Exists('$(QtMsBuild)\qt.targets') or !Exists('$(QtMsBuild)\qt.props')">
@@ -46,6 +46,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <Link>
       <AdditionalDependencies>qgis_core.lib;qgis_app.lib;qgis_gui.lib;Qt5Core.lib;Qt5Gui.lib;Qt5Widgets.lib;gdal_i.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateMapFile>true</GenerateMapFile>
     </Link>
     <ClCompile>
       <LanguageStandard>stdcpp17</LanguageStandard>
@@ -76,6 +77,7 @@
     <ClCompile Include="ReprojectRasterDialog.cpp" />
     <ClCompile Include="ResampleDialog.cpp" />
     <ClCompile Include="SpatialJoinDialog.cpp" />
+    <ClCompile Include="ZonalStatisticsDialog.cpp" />
     <QtRcc Include="QGIS_dev.qrc" />
     <QtMoc Include="QGIS_dev.h" />
     <ClCompile Include="AnalysisToolboxWidget.cpp" />
@@ -128,6 +130,9 @@
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="SpatialJoinDialog.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <QtMoc Include="ZonalStatisticsDialog.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">

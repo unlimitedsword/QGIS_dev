@@ -13,8 +13,6 @@
 
 #include <qgsproject.h>
 #include <qgsrasterlayer.h>
-// #include <qgsprojectionselectionwidget.h> // 不再需要
-// #include <qgsprojectionselectiondialog.h> // 不再需要
 #include "Output_Manager.h"
 #include <QDebug>
 
@@ -342,15 +340,15 @@ void ReprojectRasterDialog::onOkClicked()
             QString("栅格投影转换完成！\n输出文件已保存到:\n%1").arg(outputPath));
         // =====================================================================
 
-        // (可选) 如果您希望转换成功后，自动将新生成的图层添加到项目中
-        // QgsRasterLayer* newLayer = new QgsRasterLayer(outputPath, QFileInfo(outputPath).baseName());
-        // if (newLayer->isValid()) {
-        //     QgsProject::instance()->addMapLayer(newLayer);
-        //     // 也可以在这里让主窗口的图层树刷新，或者缩放到新图层
-        // } else {
-        //     qWarning() << "Failed to load reprojected layer:" << outputPath << newLayer->error().message();
-        //     delete newLayer;
-        // }
+        // (可选) 如果转换成功，自动将新生成的图层添加到项目中
+         //QgsRasterLayer* newLayer = new QgsRasterLayer(outputPath, QFileInfo(outputPath).baseName());
+         //if (newLayer->isValid()) {
+         //    QgsProject::instance()->addMapLayer(newLayer);
+         //    // 也可以在这里让主窗口的图层树刷新，或者缩放到新图层
+         //} else {
+         //    qWarning() << "Failed to load reprojected layer:" << outputPath << newLayer->error().message();
+         //    delete newLayer;
+         //}
 
         accept(); // 关闭对话框
     }

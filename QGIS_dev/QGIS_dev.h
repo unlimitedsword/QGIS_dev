@@ -60,8 +60,6 @@ private slots:
     // +++ 新增槽函数 +++
     void updateProjectCrs(); // 用于更新状态栏的CRS显示
 
-    // +++ 新增槽函数，用于响应CRS按钮的点击 +++
-    void onChangeProjectCrs();
 
     // +++ 新增槽函数 +++
     void onAddDelimitedTextLayer();
@@ -97,7 +95,7 @@ private:
     QMenu* m_fileMenu;
     QAction* m_addVectorAction;
     QAction* m_addRasterAction;
-    // +++ 新增菜单动作 +++
+
     QAction* m_addDelimitedTextLayerAction;
     QAction* m_newAction;
     QAction* m_openAction;
@@ -107,8 +105,19 @@ private:
     QMenu* m_checkMenu;
     QAction* m_checkLogsAction;
 
+    QAction* m_viewLayerManagerAction;
+    QAction* m_viewToolBarAction;
+    QAction* m_viewOutputDockAction;
+    QAction* m_viewAnalysisDockAction;
+
     // --- 工具栏和工具动作 ---
     QToolBar* m_toolBar;
+
+    QAction* m_saveProjectAction;
+    QAction* m_openProjectAction;
+    QAction* addVectorTool;
+    QAction* addRasterTool;
+
     QAction* m_zoomInAction;
     QAction* m_zoomOutAction;
     QAction* m_panAction;           // 平移动作
@@ -126,8 +135,6 @@ private:
     QLabel* m_coordsLabel;
     QLabel* m_scaleLabel;
 
-    // +++ 将 m_crsLabel 的类型从 QLabel* 修改为 QPushButton* +++
-    bool resolveLayerCrs(QgsMapLayer* layer);
-    QPushButton* m_crsButton;
+    QLabel* m_crsLabel; // 不再是 QPushButton
     QgsMapLayer* m_currentLayer;
 };

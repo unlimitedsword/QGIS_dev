@@ -72,7 +72,7 @@ void BufferDialog::setupUI()
     m_inputLayerCombo = new QComboBox(this);
     gridLayout->addWidget(m_inputLayerCombo, 0, 1);
     m_btnSelectInputLayerFile = new QPushButton("从文件...", this);
-    // gridLayout->addWidget(m_btnSelectInputLayerFile, 0, 2); // 暂时禁用文件选择，简化
+    gridLayout->addWidget(m_btnSelectInputLayerFile, 0, 2); // 暂时禁用文件选择，简化
     m_lblSelectedInputLayerInfo = new QLabel("当前选择: 无", this);
     gridLayout->addWidget(m_lblSelectedInputLayerInfo, 1, 0, 1, 3);
 
@@ -170,7 +170,7 @@ void BufferDialog::setupUI()
     setLayout(mainLayout);
 
     // 连接信号
-    // connect(m_btnSelectInputLayerFile, &QPushButton::clicked, this, &BufferDialog::onSelectInputLayerClicked); // 暂时禁用
+    connect(m_btnSelectInputLayerFile, &QPushButton::clicked, this, &BufferDialog::onSelectInputLayerClicked);
     connect(m_btnSelectOutputLayer, &QPushButton::clicked, this, &BufferDialog::onSelectOutputLayerClicked);
     connect(m_btnOk, &QPushButton::clicked, this, &BufferDialog::onOkClicked);
     connect(m_btnCancel, &QPushButton::clicked, this, &QDialog::reject);
@@ -206,9 +206,46 @@ void BufferDialog::populateUnitComboBox()
     }
 }
 
-void BufferDialog::onSelectInputLayerClicked() // 暂时未使用
+void BufferDialog::onSelectInputLayerClicked()
 {
-    // ... (如果需要从文件选择，这里的逻辑类似于其他对话框) ...
+    QString filter = "ESRI Shapefiles (*.shp);;GeoPackage (*.gpkg);;所有文件 (*.*)";
+    QString filePath = QFileDialog::getOpenFileName(
+        this,
+        "选择输入矢量文件",
+        QStandardPaths::writableLocation(QStandardPaths::HomeLocation),
+        filter
+    );
+    if (filePath.isEmpty())
+        return;
+
+    // 尝试加载为矢量图层
+    std::unique_ptr<QgsVectorLayer> tempLayer(new QgsVectorLayer(filePath, QFileInfo(filePath).baseName(), "ogr"));
+    if (!tempLayer->isValid()) {
+        QMessageBox::critical(this, "加载错误", "无法加载所选文件为有效矢量图层:\n" + filePath);
+        return;
+    }
+
+    // 更新UI显示
+    m_lblSelectedInputLayerInfo->setText(QString("当前选择: %1 (文件)").arg(QFileInfo(filePath).fileName()));
+    m_inputLayerCombo->setCurrentIndex(0); // 选中“--- 从项目中选择矢量图层 ---”
+
+    // 设置当前输入图层为临时加载的图层
+    m_currentInputLayer = tempLayer.release(); // 交给成员变量管理
+
+    // 更新单位下拉框（根据图层CRS）
+    if (m_currentInputLayer->crs().isValid()) {
+        Qgis::DistanceUnit layerUnits = Qgis::DistanceUnit::Meters; // 默认米
+        int unitIndex = m_unitCombo->findData(static_cast<int>(layerUnits));
+        if (unitIndex != -1) {
+            m_unitCombo->setCurrentIndex(unitIndex);
+        }
+        else if (m_currentInputLayer->crs().isGeographic()) {
+            int degIndex = m_unitCombo->findData(static_cast<int>(Qgis::DistanceUnit::Degrees));
+            if (degIndex != -1) m_unitCombo->setCurrentIndex(degIndex);
+        }
+    }
+
+    updateDefaultOutputPath();
 }
 
 void BufferDialog::onInputLayerChanged()
@@ -293,13 +330,11 @@ double BufferDialog::strokeWidth() const { return m_spinStrokeWidth->value(); }
 void BufferDialog::onOkClicked()
 {
     QString inputPath = m_currentInputLayer ? m_currentInputLayer->source() : QString();
-
     double distanceValueFromUI = bufferDistance();
-    Qgis::DistanceUnit unitSelectedByUser = distanceUnits(); // 我们仍用QGIS枚举，但需转为GDAL能理解的方式
+    Qgis::DistanceUnit unitSelectedByUser = distanceUnits();
     int segments = this->segments();
     bool dissolve = dissolveResult();
     QString outputPath = outputLayerPath();
-    // 可视化参数在GDAL版本中暂时不直接应用到输出文件，而是加载后设置QGIS图层样式
 
     if (inputPath.isEmpty() || outputPath.isEmpty() || distanceValueFromUI <= 0) {
         QMessageBox::warning(this, "输入错误", "请检查所有输入参数。");
@@ -307,83 +342,133 @@ void BufferDialog::onOkClicked()
     }
 
     qDebug() << "\n====== 开始GDAL缓冲区分析 ======";
-    // ... 其他qDebug输出 ...
+    qDebug() << "输入图层:" << inputPath;
+    qDebug() << "UI距离值:" << distanceValueFromUI;
+    qDebug() << "UI单位:" << QgsUnitTypes::toString(unitSelectedByUser) << "(" << static_cast<int>(unitSelectedByUser) << ")";
+    qDebug() << "段数:" << segments;
+    qDebug() << "溶解:" << dissolve;
+    qDebug() << "输出路径:" << outputPath;
 
-    GDALAllRegister(); // 注册所有GDAL驱动
-    OGRRegisterAll();  // 注册所有OGR驱动
 
-    // 1. 打开输入矢量数据集
+    GDALAllRegister();
+    OGRRegisterAll();
+
     GDALDataset* poSrcDS = (GDALDataset*)GDALOpenEx(inputPath.toUtf8().constData(), GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr);
     if (!poSrcDS) {
         QMessageBox::critical(this, "GDAL错误", "无法打开输入矢量文件: " + inputPath + "\n" + CPLGetLastErrorMsg());
         return;
     }
-    OGRLayer* poSrcLayer = poSrcDS->GetLayer(0); // 假设只有一个图层
+    OGRLayer* poSrcLayer = poSrcDS->GetLayer(0);
     if (!poSrcLayer) {
         QMessageBox::critical(this, "GDAL错误", "无法获取输入图层。");
         GDALClose(poSrcDS);
         return;
     }
-    OGRSpatialReference* poSrcSRS = poSrcLayer->GetSpatialRef(); // 获取源SRS
+    OGRSpatialReference* poSrcSRS = poSrcLayer->GetSpatialRef();
 
-    // 2. 单位和距离转换 (这是最复杂的部分)
-    double distanceInSrcUnits;
-    bool srcIsGeographic = false;
-    if (poSrcSRS != nullptr && poSrcSRS->IsGeographic()) {
-        srcIsGeographic = true;
-    }
+    // --- 重点修改区域开始 ---
+    double distanceInSrcUnits = distanceValueFromUI; // 默认值，如果无法进行转换则使用
 
-    else {
-        // 需要将用户选择的单位（米、公里等）转换为源图层CRS的单位
-        // 如果源是地理坐标系（单位是度），这是一个近似转换
-        // 如果源是投影坐标系（单位是米/英尺），这是一个标准转换
-        OGRSpatialReference oTargetSRS_ForConversion; // 临时目标SRS用于单位转换
-        double conversionFactor = 1.0;
+    if (poSrcSRS != nullptr) {
+        double distanceInMeters_fromUserSelection; // 用户选择的单位转换成米
 
-        switch (unitSelectedByUser) {
-        case Qgis::DistanceUnit::Meters:     conversionFactor = 1.0; break;
-        case Qgis::DistanceUnit::Kilometers: conversionFactor = 1000.0; break;
-        case Qgis::DistanceUnit::Feet:       conversionFactor = 0.3048; break; // 1英尺 = 0.3048米
-        case Qgis::DistanceUnit::Miles:      conversionFactor = 1609.34; break; // 1英里 = 1609.34米
-        default:
-            QMessageBox::warning(this, "单位警告", "不支持的缓冲区单位，将按地图单位处理。");
-            distanceInSrcUnits = distanceValueFromUI;
-            goto proceed_with_buffer; // 跳过复杂转换
+        // 步骤1: 将用户界面上的距离和单位统一转换为米 (除非用户选择的就是度)
+        bool userSelectedDegrees = (unitSelectedByUser == Qgis::DistanceUnit::Degrees);
+
+        if (!userSelectedDegrees) {
+            switch (unitSelectedByUser) {
+            case Qgis::DistanceUnit::Meters:
+                distanceInMeters_fromUserSelection = distanceValueFromUI;
+                break;
+            case Qgis::DistanceUnit::Kilometers:
+                distanceInMeters_fromUserSelection = distanceValueFromUI * 1000.0;
+                break;
+            case Qgis::DistanceUnit::Feet:
+                distanceInMeters_fromUserSelection = distanceValueFromUI * 0.3048;
+                break;
+            case Qgis::DistanceUnit::Miles:
+                distanceInMeters_fromUserSelection = distanceValueFromUI * 1609.34;
+                break;
+            default:
+                QMessageBox::warning(this, "单位警告", "未知的缓冲区单位，将按输入值直接处理。");
+                // distanceInSrcUnits 保持为 distanceValueFromUI
+                goto end_unit_conversion_label; // 直接跳到转换结束
+            }
+            qDebug() << "用户输入已转换为米:" << distanceInMeters_fromUserSelection << "m";
         }
 
-        double distanceInMeters = distanceValueFromUI * conversionFactor;
-
-        if (srcIsGeographic) {
-            // 将米近似转换为度。这是一个粗略的全局估计。
-            // 1度约等于111公里 (111000米) 在赤道附近。
-            // 更精确的方法需要考虑纬度。
-            // OGRGeometry::Buffer 在地理坐标系下，通常期望距离也是以度为单位。
-            distanceInSrcUnits = distanceInMeters / 111000.0;
-            qDebug() << "Input is geographic. Buffer distance approx." << distanceInSrcUnits << "degrees.";
-        }
-        else if (poSrcSRS != nullptr) {
-            // 投影坐标系，获取其线性单位转换为米后的比例因子
-            double linearUnitsToMeters = poSrcSRS->GetLinearUnits(); // 返回1个输入单位等于多少米
-            if (linearUnitsToMeters > 0) {
-                distanceInSrcUnits = distanceInMeters / linearUnitsToMeters;
-                qDebug() << "Input is projected. Linear unit factor:" << linearUnitsToMeters
-                    << "Buffer distance in layer units:" << distanceInSrcUnits;
+        // 步骤2: 根据图层坐标系，将米（或度）转换为图层实际单位
+        if (poSrcSRS->IsGeographic()) {
+            if (userSelectedDegrees) {
+                distanceInSrcUnits = distanceValueFromUI; // 用户选了度，图层是地理坐标系，直接用
+                qDebug() << "图层为地理坐标系，用户单位为度。缓冲区距离 (度):" << distanceInSrcUnits;
             }
             else {
-                qDebug() << "Could not determine linear unit factor for projected CRS. Using meters directly.";
-                distanceInSrcUnits = distanceInMeters; // 假设投影单位是米
+                // 图层是地理坐标系，用户单位是米/公里等线性单位，需转为度
+                // 1度约等于111195米 (这是一个平均值，更精确的计算会考虑纬度)
+                // QGIS内部进行此类操作时可能会临时投影到合适的等距方位投影
+                // GDAL OGR_G_Buffer 在地理坐标系上期望距离参数也是度
+                distanceInSrcUnits = distanceInMeters_fromUserSelection / 111195.0;
+                qDebug() << "图层为地理坐标系，用户选择线性单位。缓冲区距离 (近似度):" << distanceInSrcUnits;
             }
         }
-        else {
-            qDebug() << "Source CRS unknown. Assuming distance is in target units for buffer.";
-            distanceInSrcUnits = distanceValueFromUI; // 无法确定单位，按用户输入
+        else { // 图层是投影坐标系
+            if (userSelectedDegrees) {
+                // 用户选了度，但图层是投影坐标系。这种情况通常不建议。
+                // QGIS桌面通常不允许为投影图层选择“度”作为缓冲区单位。
+                // 我们这里采取一个策略：警告并按原始值处理，期望用户知道其含义。
+                QMessageBox::warning(this, "单位不匹配警告", "为投影坐标系图层选择“度”作为缓冲区单位可能产生非预期结果。将直接使用输入值作为图层单位的距离。");
+                distanceInSrcUnits = distanceValueFromUI;
+                qDebug() << "图层为投影坐标系，用户单位为度。缓冲区距离 (按图层单位):" << distanceInSrcUnits;
+            }
+            else {
+                // 图层是投影坐标系，用户单位是米/公里等线性单位
+                // 获取投影坐标系的线性单位对应的米数 (例如，如果单位是英尺，返回0.3048)
+                double metersPerLayerUnit = poSrcSRS->GetLinearUnits(nullptr); // 获取1个图层单位等于多少米
+                if (metersPerLayerUnit > 1e-9) { // 避免除以0或非常小的值
+                    distanceInSrcUnits = distanceInMeters_fromUserSelection / metersPerLayerUnit;
+                    qDebug() << "图层为投影坐标系。1图层单位=" << metersPerLayerUnit << "米。缓冲区距离 (图层单位):" << distanceInSrcUnits;
+                }
+                else {
+                    qDebug() << "无法确定投影坐标系的有效线性单位因子 (因子=" << metersPerLayerUnit
+                        << ")。假设图层单位是米。";
+                    distanceInSrcUnits = distanceInMeters_fromUserSelection; // 回退：假设图层单位是米
+                }
+            }
         }
     }
-proceed_with_buffer:;
+    else { // poSrcSRS is NULL (图层没有坐标系信息)
+        qDebug() << "输入图层无坐标系信息。将直接使用用户输入值 (" << distanceValueFromUI
+            << ") 和单位 (" << QgsUnitTypes::toString(unitSelectedByUser)
+            << ") 作为缓冲区的距离。";
+        // 在这种情况下，如果用户选了公里但图层单位是米，结果会不正确。
+        // 但没有CRS信息，无法做更智能的转换。
+        // 为了与之前的逻辑（和QGIS某些工具的行为）保持一定一致性，
+        // 如果是常见线性单位，我们还是先转成米，再假设图层单位是米
+        // 如果是度，就直接用。这是一个折衷。
+        switch (unitSelectedByUser) {
+        case Qgis::DistanceUnit::Meters:     distanceInSrcUnits = distanceValueFromUI; break;
+        case Qgis::DistanceUnit::Kilometers: distanceInSrcUnits = distanceValueFromUI * 1000.0; break; // 这里产生100000
+        case Qgis::DistanceUnit::Feet:       distanceInSrcUnits = distanceValueFromUI * 0.3048; break;
+        case Qgis::DistanceUnit::Miles:      distanceInSrcUnits = distanceValueFromUI * 1609.34; break;
+        case Qgis::DistanceUnit::Degrees:    distanceInSrcUnits = distanceValueFromUI; break; // 直接用度
+        default: distanceInSrcUnits = distanceValueFromUI; break; // 其他未知单位直接用
+        }
+        qDebug() << "无CRS，最终采用的缓冲距离(假设目标单位兼容米或度):" << distanceInSrcUnits;
+        // 如果图层是度为单位但无CRS，而用户选了公里，上面的转换会导致距离值很大（如100km -> 100000）
+        // 这时GDAL Buffer会将其解释为100000度，这是不正确的。
+        // 最安全的做法是，如果无CRS，就直接用 distanceValueFromUI，并警告用户。
+        // distanceInSrcUnits = distanceValueFromUI; // Revert to this simpler logic for no-CRS
+        // QMessageBox::warning(this, "坐标系缺失", "输入图层缺少坐标系信息。缓冲区距离将直接使用您输入的值，请确保其单位与图层内部单位一致。");
+
+    }
+
+end_unit_conversion_label:;
+    qDebug() << "最终用于 OGR_G_Buffer 的距离值:" << distanceInSrcUnits;
+    // --- 重点修改区域结束 ---
 
 
-    // 3. 创建输出Shapefile驱动
-    const char* pszDriverName = "ESRI Shapefile"; // 或根据outputPath后缀选择
+    const char* pszDriverName = "ESRI Shapefile";
     if (outputPath.endsWith(".gpkg", Qt::CaseInsensitive)) pszDriverName = "GPKG";
 
     GDALDriver* poDriver = GetGDALDriverManager()->GetDriverByName(pszDriverName);
@@ -393,10 +478,10 @@ proceed_with_buffer:;
         return;
     }
 
-    // 4. 创建输出数据集 (如果文件已存在则先删除)
     if (QFile::exists(outputPath)) {
         if (GDALDeleteDataset(poDriver, outputPath.toUtf8().constData()) != CE_None) {
-            qDebug() << "Could not delete existing output file:" << outputPath;
+            qDebug() << "无法删除已存在的输出文件:" << outputPath << CPLGetLastErrorMsg();
+            // 可以选择报错返回，或者继续尝试覆盖 (Create可能失败)
         }
     }
     GDALDataset* poDstDS = poDriver->Create(outputPath.toUtf8().constData(), 0, 0, 0, GDT_Unknown, nullptr);
@@ -406,10 +491,9 @@ proceed_with_buffer:;
         return;
     }
 
-    // 5. 创建输出图层，定义为面类型，并复制源图层的字段和SRS
     OGRLayer* poDstLayer = poDstDS->CreateLayer(QFileInfo(outputPath).completeBaseName().toUtf8().constData(),
-        poSrcSRS, // 使用源图层的SRS
-        wkbPolygon, nullptr); // 几何类型为面
+        poSrcSRS,
+        wkbPolygon, nullptr);
     if (poDstLayer == nullptr) {
         QMessageBox::critical(this, "GDAL错误", "无法创建输出图层。");
         GDALClose(poDstDS); GDALClose(poSrcDS);
@@ -419,94 +503,124 @@ proceed_with_buffer:;
     for (int iField = 0; iField < poSrcFDefn->GetFieldCount(); iField++) {
         OGRFieldDefn* poFieldDefn = poSrcFDefn->GetFieldDefn(iField);
         if (poDstLayer->CreateField(poFieldDefn) != OGRERR_NONE) {
-            qWarning() << "Could not create field:" << poFieldDefn->GetNameRef();
+            qWarning() << "无法创建字段:" << poFieldDefn->GetNameRef();
         }
     }
 
-    // 6. 遍历要素并生成缓冲区
     OGRFeature* poSrcFeature;
     OGRFeature* poDstFeature = OGRFeature::CreateFeature(poDstLayer->GetLayerDefn());
-    QList<OGRGeometry*> bufferedGeometries; // 用于溶解
+    QList<OGRGeometry*> bufferedGeometries;
 
     poSrcLayer->ResetReading();
+    int featureCount = 0;
     while ((poSrcFeature = poSrcLayer->GetNextFeature()) != nullptr) {
+        featureCount++;
         OGRGeometry* poSrcGeom = poSrcFeature->GetGeometryRef();
-        if (poSrcGeom != nullptr) {
-            // 核心：调用Buffer方法
-            // 第二个参数是 segments (quadsecs in OGR)
+        if (poSrcGeom != nullptr && !poSrcGeom->IsEmpty()) {
             OGRGeometry* poBufferedGeom = poSrcGeom->Buffer(distanceInSrcUnits, segments);
 
             if (poBufferedGeom != nullptr && !poBufferedGeom->IsEmpty()) {
                 if (dissolve) {
-                    bufferedGeometries.append(poBufferedGeom); // 先收集，不直接写入
-                }
-                else {
-                    poDstFeature->SetGeometry(poBufferedGeom);
-                    for (int iField = 0; iField < poSrcFDefn->GetFieldCount(); iField++) {
-                        poDstFeature->SetField(iField, poSrcFeature->GetRawFieldRef(iField));
-                    }
-                    if (poDstLayer->CreateFeature(poDstFeature) != OGRERR_NONE) {
-                        qWarning() << "Failed to create feature in output layer.";
-                    }
+                    bufferedGeometries.append(poBufferedGeom->clone()); // 克隆以备溶解
                     OGRGeometryFactory::destroyGeometry(poBufferedGeom);
                 }
+                else {
+                    poDstFeature->SetFrom(poSrcFeature, TRUE); // 复制属性
+                    poDstFeature->SetGeometryDirectly(poBufferedGeom); // poBufferedGeom所有权转移
+                    if (poDstLayer->CreateFeature(poDstFeature) != OGRERR_NONE) {
+                        qWarning() << "无法在输出图层创建要素。";
+                    }
+                    // poDstFeature->SetGeometry(nullptr) might be needed if reusing poDstFeature
+                    // but SetGeometryDirectly transfers ownership, so it's fine.
+                }
             }
-            else if (poBufferedGeom) {
+            else if (poBufferedGeom) { // Buffer可能返回空几何
                 OGRGeometryFactory::destroyGeometry(poBufferedGeom);
             }
         }
         OGRFeature::DestroyFeature(poSrcFeature);
     }
+    qDebug() << "处理了" << featureCount << "个要素。";
 
-    // 7. 如果需要溶解
+
     if (dissolve && !bufferedGeometries.isEmpty()) {
-        qDebug() << "Dissolving" << bufferedGeometries.size() << "geometries...";
-        OGRGeometryCollection oGeomColl;
-        for (OGRGeometry* geom : bufferedGeometries) {
-            oGeomColl.addGeometry(geom);
-            OGRGeometryFactory::destroyGeometry(geom); // addGeometry会克隆，所以可以销毁原件
+        qDebug() << "开始溶解" << bufferedGeometries.size() << "个缓冲区几何...";
+        // OGRGeometryCollection oGeomColl; // 旧方法
+        // for (OGRGeometry* geom : bufferedGeometries) {
+        //    oGeomColl.addGeometry(geom); // addGeometry clones
+        //    OGRGeometryFactory::destroyGeometry(geom); // 所以可以销毁原件
+        // }
+        // bufferedGeometries.clear();
+        // OGRGeometry* poDissolvedGeom = oGeomColl.UnionCascaded();
+
+        // 更高效的溶解方法，特别是对于大量几何图形
+        OGRGeometry* poDissolvedGeom = nullptr;
+        if (!bufferedGeometries.isEmpty()) {
+            poDissolvedGeom = bufferedGeometries.takeFirst(); // 从第一个开始
+            for (OGRGeometry* geom : bufferedGeometries) {
+                OGRGeometry* tempUnion = poDissolvedGeom->Union(geom);
+                OGRGeometryFactory::destroyGeometry(poDissolvedGeom);
+                OGRGeometryFactory::destroyGeometry(geom);
+                poDissolvedGeom = tempUnion;
+                if (!poDissolvedGeom) { // Union失败
+                    qWarning() << "溶解过程中Union操作失败。";
+                    break;
+                }
+            }
         }
         bufferedGeometries.clear();
 
-        OGRGeometry* poDissolvedGeom = oGeomColl.UnionCascaded(); // 或者 oGeomColl.UnaryUnion();
+
         if (poDissolvedGeom && !poDissolvedGeom->IsEmpty()) {
-            poDstFeature->SetGeometry(poDissolvedGeom);
-            // 溶解后属性如何处理？这里不设置
+            // 对于溶解后的单个要素，属性如何处理？通常是清空或赋一个代表性值。
+            // 这里我们不设置属性，只设置几何。
+            poDstFeature->SetGeometryDirectly(poDissolvedGeom); // 所有权转移
             if (poDstLayer->CreateFeature(poDstFeature) != OGRERR_NONE) {
-                qWarning() << "Failed to create dissolved feature in output layer.";
+                qWarning() << "无法在输出图层创建溶解后的要素。";
             }
-            OGRGeometryFactory::destroyGeometry(poDissolvedGeom);
         }
-        else if (poDissolvedGeom) {
+        else if (poDissolvedGeom) { //可能是空的union结果
             OGRGeometryFactory::destroyGeometry(poDissolvedGeom);
+            qDebug() << "溶解结果为空几何。";
         }
+        qDebug() << "溶解完成。";
     }
+    else if (dissolve && bufferedGeometries.isEmpty()) {
+        qDebug() << "请求溶解但没有有效的缓冲区几何体可供溶解。";
+    }
+
     OGRFeature::DestroyFeature(poDstFeature);
 
-    // 8. 清理和关闭
-    GDALClose(poDstDS); // 关闭输出数据集以写入磁盘
+    GDALClose(poDstDS);
     GDALClose(poSrcDS);
 
-    // 9. 加载结果并设置样式 (这部分与QGIS Processing的方案类似)
     QgsVectorLayer* newLayer = new QgsVectorLayer(outputPath, QFileInfo(outputPath).baseName(), "ogr");
     if (newLayer->isValid()) {
-        std::unique_ptr<QgsFillSymbol> fillSymbolPtr = QgsFillSymbol::createSimple({
+        std::unique_ptr<QgsFillSymbol> fillSymbol(QgsFillSymbol::createSimple({
             {"color", fillColor().name(QColor::HexArgb)},
             {"style", "solid"},
             {"outline_color", strokeColor().name(QColor::HexArgb)},
-            {"outline_width", QString::number(strokeWidth())}
-            });
-        fillSymbolPtr->setOpacity(fillOpacity());
-        QgsSingleSymbolRenderer* renderer = new QgsSingleSymbolRenderer(fillSymbolPtr.get());
+            {"outline_width", QString::number(strokeWidth())},
+            {"outline_style", "solid"} // 添加边界样式以确保可见
+            }));
+        // fillSymbol->setOpacity(fillOpacity()); // QgsColorButton已经包含alpha，所以这里不需要单独设置了
+                                                // 如果颜色按钮的alphaF()与m_spinFillOpacity不同步则需要
+
+        QColor currentFillColor = fillColor(); // 从按钮获取
+        fillSymbol->setColor(currentFillColor); // 设置包含透明度的颜色
+        // fillSymbol->setOpacity(currentFillColor.alphaF()); // 或者这样明确设置，如果上面setColor不处理alpha的话
+
+
+        QgsSingleSymbolRenderer* renderer = new QgsSingleSymbolRenderer(fillSymbol.release()); // release所有权
         newLayer->setRenderer(renderer);
-        fillSymbolPtr.release(); // 交给renderer管理，防止析构
+        newLayer->triggerRepaint(); // 确保刷新
 
         QgsProject::instance()->addMapLayer(newLayer);
         QMessageBox::information(this, "成功", "GDAL缓冲区分析完成！\n输出文件: " + outputPath);
         accept();
     }
     else {
-        QMessageBox::critical(this, "加载错误", "缓冲区已生成，但无法加载到地图: " + outputPath + "\n" + newLayer->error().message());
-        delete newLayer;
+        QMessageBox::critical(this, "加载错误", "缓冲区已生成，但无法加载到地图: " + outputPath + "\n错误: " + newLayer->error().message());
+        delete newLayer; // 清理无效图层
     }
 }

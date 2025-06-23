@@ -454,24 +454,68 @@ void ResampleDialog::onOkClicked()
             GDALDestroyTransformer(psWarpOptions->pTransformerArg);
             psWarpOptions->pTransformerArg = nullptr;
         }
-        CPLFree(psWarpOptions->panSrcBands); psWarpOptions->panSrcBands = nullptr;
-        CPLFree(psWarpOptions->panDstBands); psWarpOptions->panDstBands = nullptr;
-        // papszWarpOptions 在这个版本中未使用，所以不需要CSLDestroy
+        if (psWarpOptions->panSrcBands) { // 检查是否为nullptr，以防之前分配失败
+            CPLFree(psWarpOptions->panSrcBands); psWarpOptions->panSrcBands = nullptr;
+        }
+        if (psWarpOptions->panDstBands) {
+            CPLFree(psWarpOptions->panDstBands); psWarpOptions->panDstBands = nullptr;
+        }
         GDALDestroyWarpOptions(psWarpOptions); psWarpOptions = nullptr;
     }
 
+    // **确保目标数据集在所有操作完成后，并且在尝试用QGIS加载它之前被关闭**
     if (hDstDS != nullptr) {
-        GDALClose(hDstDS); // 确保先关闭目标数据集，数据才会完全写入
-        hDstDS = nullptr;
+        qDebug() << "Closing destination dataset (hDstDS) before attempting to load with QGIS.";
+        GDALClose(hDstDS);
+        hDstDS = nullptr; // 设为nullptr，避免后续意外关闭
     }
     if (hSrcDS != nullptr) {
+        qDebug() << "Closing source dataset (hSrcDS).";
         GDALClose(hSrcDS);
         hSrcDS = nullptr;
     }
 
-    // --- 步骤 6: 结果反馈 ---
-    if (eErr == CE_None) {
+    // --- 步骤 6: 结果反馈和加载到QGIS ---
+    if (eErr == CE_None) { // 只有当 GDAL Warp 操作没有报告错误时才继续
         QMessageBox::information(this, "成功", "栅格重采样完成！\n输出文件: " + outputPath);
-        accept();
+
+        // ====================== 加载结果图层并进行详细错误检查 ======================
+        OutputManager::instance()->logMessage("Attempting to load resampled raster: " + outputPath);
+        QgsRasterLayer* newLayer = new QgsRasterLayer(outputPath, QFileInfo(outputPath).baseName(), "gdal");
+
+        if (newLayer->isValid()) {
+            OutputManager::instance()->logMessage("Resampled raster layer loaded successfully: " + newLayer->name());
+            QgsProject::instance()->addMapLayer(newLayer);
+            // (可选) 主窗口缩放到新图层
+            // 例如，可以发射一个信号，让主窗口去处理
+            // emit resampleSucceededAndLayerAdded(newLayer); 
+        }
+        else {
+            QString errorMsg = "加载重采样后的栅格图层失败: " + outputPath;
+            if (newLayer) { // 确保newLayer不是nullptr才调用error()
+                errorMsg += "\nQGIS Layer Error: " + newLayer->error().message();
+                delete newLayer; // 清理无效图层对象
+                newLayer = nullptr;
+            }
+            else {
+                errorMsg += "\nQGIS Layer Error: Layer object creation failed (returned nullptr).";
+            }
+
+            const char* gdalLastError = CPLGetLastErrorMsg();
+            if (gdalLastError && strlen(gdalLastError) > 0 && strcmp(gdalLastError, "None") != 0) { // 检查是否真的有GDAL错误
+                errorMsg += "\nLast GDAL Error (after attempting QGIS load): " + QString::fromUtf8(gdalLastError);
+            }
+
+            OutputManager::instance()->logError(errorMsg);
+            QMessageBox::warning(this, "加载失败", errorMsg);
+        }
+        // =======================================================================
+        accept(); // 关闭对话框
+    }
+    else {
+        // 如果 eErr != CE_None，说明GDAL Warp操作本身就失败了
+        // QMessageBox::critical 已经在之前的错误判断中显示过了，这里可以不再重复
+        // 或者，如果之前的QMessageBox只针对特定步骤，这里可以加一个总的失败提示
+        OutputManager::instance()->logError("GDAL Warp operation failed with error code: " + QString::number(eErr));
     }
 }

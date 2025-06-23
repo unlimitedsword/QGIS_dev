@@ -5,6 +5,7 @@
 #include "RasterClipDialog.h"
 #include "BufferDialog.h"
 #include "SpatialJoinDialog.h"
+#include "ZonalStatisticsDialog.h"
 
 #include <QVBoxLayout>
 #include <QTreeView>
@@ -70,10 +71,10 @@ void AnalysisToolboxWidget::populateToolTree()
     rasterGroup->setEditable(false);
     m_toolModel->appendRow(rasterGroup);
 
-    QStandardItem* rasterStatsItem = new QStandardItem("波段统计");
-    rasterStatsItem->setData(static_cast<int>(AnalysisToolId::RasterStats), ToolIdRole);
-    rasterStatsItem->setEditable(false);
-    rasterGroup->appendRow(rasterStatsItem);
+    //QStandardItem* rasterStatsItem = new QStandardItem("波段统计");
+    //rasterStatsItem->setData(static_cast<int>(AnalysisToolId::RasterStats), ToolIdRole);
+    //rasterStatsItem->setEditable(false);
+    //rasterGroup->appendRow(rasterStatsItem);
 
     QStandardItem* rasterClipItem = new QStandardItem("地图裁剪");
     rasterClipItem->setData(static_cast<int>(AnalysisToolId::RasterClip), ToolIdRole);
@@ -164,7 +165,14 @@ void AnalysisToolboxWidget::onItemDoubleClicked(const QModelIndex& index)
         qDebug() << "ReprojectRasterDialog opened.";
     }
     break;
-        // ... 其他工具的处理 ...
+    case AnalysisToolId::ZonalStats:
+    {
+        ZonalStatisticsDialog* zonalDialog = new ZonalStatisticsDialog(this);
+        zonalDialog->setAttribute(Qt::WA_DeleteOnClose);
+        zonalDialog->show();
+        qDebug() << "ZonalStatisticsDialog opened.";
+    }
+    break;
     default:
         qWarning() << "Unknown tool ID:" << static_cast<int>(toolId);
         break;

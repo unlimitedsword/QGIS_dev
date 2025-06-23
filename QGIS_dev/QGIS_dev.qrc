@@ -1,4 +1,15 @@
 <RCC>
-    <qresource prefix="QGIS_dev">
+    <qresource prefix="/QGIS_dev">
+        <file>resource/images/保存.png</file>
+        <file>resource/images/打开文件.png</file>
+        <file>resource/images/反选.png</file>
+        <file>resource/images/放大.png</file>
+        <file>resource/images/平移.png</file>
+        <file>resource/images/删除.png</file>
+        <file>resource/images/矢量数据集.png</file>
+        <file>resource/images/缩小.png</file>
+        <file>resource/images/选择.png</file>
+        <file>resource/images/栅格影像.png</file>
+        <file>resource/images/QuickGIS.ico</file>
     </qresource>
 </RCC>

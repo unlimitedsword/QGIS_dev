@@ -23,22 +23,18 @@ MapCanvas::MapCanvas(QWidget* parent)
     m_qgsCanvas->setMapTool(m_panTool);
     m_panTool->setCursor(Qt::OpenHandCursor);
 
-    // ====================== 核心修正 ======================
-    // 删除所有主动设置 QgsProject::instance()->setCrs() 的代码。
-    // MapCanvas 的职责：只做一件事 —— 忠实地跟随 QgsProject 的CRS。
-
-    // 1. 启动时，将自己的目标CRS设置为当前项目的CRS (此时可能无效)
-    m_qgsCanvas->setDestinationCrs(QgsProject::instance()->crs());
-
-    // 2. 建立一个永久的连接：只要项目CRS变了，画布就跟着变。
-    connect(QgsProject::instance(), &QgsProject::crsChanged,
-        m_qgsCanvas, [this]() {
-            m_qgsCanvas->setDestinationCrs(QgsProject::instance()->crs());
-        });
-
+    // ====================== 画布目标CRS固定为WGS 84 ======================
+    QgsCoordinateReferenceSystem wgs84("EPSG:4326");
+    if (wgs84.isValid()) {
+        m_qgsCanvas->setDestinationCrs(wgs84);
+        qDebug() << "MapCanvas destination CRS permanently set to WGS 84.";
+    }
+    else {
+        qDebug() << "CRITICAL: Failed to create WGS 84 for MapCanvas destination CRS.";
+    }
     // ========================================================
 
-    // 连接比例尺信号 (这部分不变)
+    // 连接比例尺信号
     connect(m_qgsCanvas, &QgsMapCanvas::scaleChanged, this, &MapCanvas::onCanvasScaleChanged);
     onCanvasScaleChanged(m_qgsCanvas->scale());
 }

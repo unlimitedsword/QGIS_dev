@@ -83,13 +83,13 @@ void AttributeTableDialog::setupUI()
 
     // a. 反向选择按钮
     m_invertSelectionButton = new QPushButton("反向选择", this);
-    m_invertSelectionButton->setIcon(QIcon("resource/images/反选.png"));
+    m_invertSelectionButton->setIcon(QIcon(":/QGIS_dev/resource/images/反选.png"));
     m_invertSelectionButton->setToolTip("选中所有当前未选中的行，并取消选中当前已选中的行");
     controlLayout->addWidget(m_invertSelectionButton);
 
     // b. 删除按钮 (最右侧)
     m_deleteButton = new QPushButton("删除选中", this);
-    m_deleteButton->setIcon(QIcon("resource/images/删除.png"));
+    m_deleteButton->setIcon(QIcon(":/QGIS_dev/resource/images/删除.png"));
     m_deleteButton->setToolTip("删除表格中所有选中的行");
     QgsVectorDataProvider* provider = m_layer->dataProvider();
     if (!provider || !(provider->capabilities())) {
